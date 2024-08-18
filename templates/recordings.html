@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recordings and Screenshots</title>
+    <!-- Google Fonts -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap">
+    <!-- Link to the external CSS file -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+<h1>Available Recordings and Screenshots</h1>
+
+<h2>Recordings</h2>
+<ul class="media-list">
+    {% for recording in recordings %}
+    <li>
+        <a href="{{ url_for('view_file', filename=recording) }}">{{ recording }}</a>
+        <video controls>
+            <source src="{{ url_for('view_file', filename=recording) }}" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </li>
+    {% endfor %}
+</ul>
+
+<h2>Screenshots</h2>
+<ul class="media-list">
+    {% for screenshot in screenshots %}
+    <li>
+        <a href="{{ url_for('view_file', filename=screenshot) }}">{{ screenshot }}</a>
+        <img src="{{ url_for('view_file', filename=screenshot) }}" alt="{{ screenshot }}">
+    </li>
+    {% endfor %}
+</ul>
+</body>
+</html>
