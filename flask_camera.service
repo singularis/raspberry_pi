@@ -1,0 +1,13 @@
+[Unit]
+Description=Flask Camera Application
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/dante/camera/stream_video.py
+WorkingDirectory=/home/dante
+Restart=always
+User=dante
+Environment=FLASK_ENV=production
+
+[Install]
+WantedBy=multi-user.target
