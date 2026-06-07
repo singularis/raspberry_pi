@@ -1,13 +1,13 @@
 [Unit]
-Description=Flask Camera Application
+Description=Flask Camera Application (Optimised for Pi Zero)
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 /home/dante/camera/stream_video.py
-WorkingDirectory=/home/dante
+ExecStart=/usr/bin/python3 /home/dante/raspberry_pi/stream_video.py
+WorkingDirectory=/home/dante/raspberry_pi
 Restart=always
 User=dante
-Environment=FLASK_ENV=production
+Environment=FLASK_DEBUG=0
 
 [Install]
 WantedBy=multi-user.target

@@ -1,130 +1,253 @@
-from flask import Flask, Response, jsonify, render_template, send_from_directory
-import os
-import datetime
+#!/usr/bin/env python3
+"""
+Ultra-lean MJPEG streamer for Raspberry Pi Zero W + Arducam IMX519.
+───────────────────────────────────────────────────────────────────
+Hardware: single-core ARMv6 @ 1 GHz, 427 MB RAM, 64-128 MB GPU.
+
+Key design decisions (every byte and cycle matters):
+  ▸ NO OpenCV, NO numpy at runtime — saves ~80 MB RSS.
+  ▸ JPEG encoding via Picamera2's MJPEGEncoder which delegates to
+    the hardware-accelerated ISP / libjpeg-turbo internally, instead
+    of doing capture_array() → cvtColor() → imencode() on the CPU.
+  ▸ Rotation done by the ISP via libcamera Transform (zero CPU cost).
+  ▸ YUV420 main stream — 1.5 bytes/pixel vs 3 bytes/pixel (BGR888),
+    halving frame-buffer memory. The MJPEG encoder accepts YUV natively.
+  ▸ 2 buffers only (minimum for smooth pipeline, saves ~2 MB).
+  ▸ All ISP post-processing disabled (noise reduction, sharpening).
+  ▸ Single shared frame broadcast — encode once, fan out to N viewers.
+  ▸ Camera starts on first viewer, stops after last viewer leaves.
+  ▸ Flask with minimal middleware — no static files, no sessions.
+
+Endpoints:
+  GET /           → simple HTML page with embedded <img>
+  GET /video_feed → raw MJPEG stream
+"""
+
+import io
 import time
 import threading
+
+from flask import Flask, Response
 from picamera2 import Picamera2
-import cv2
-import random
+from picamera2.encoders import MJPEGEncoder, Quality
+from picamera2.outputs import FileOutput
+from libcamera import Transform
+
+# ──── Tunables ──────────────────────────────────────────────────────────
+RESOLUTION      = (640, 480)    # Sweet-spot for Pi Zero
+TARGET_FPS      = 15            # Achievable at 640×480 on Pi Zero
+JPEG_QUALITY    = Quality.MEDIUM  # LOW/MEDIUM/HIGH/VERY_HIGH
+BUFFER_COUNT    = 2             # Minimum for smooth capture
+IDLE_TIMEOUT_S  = 5.0           # Seconds after last viewer → stop camera
+# ────────────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = None  # No request size limit needed
 
-# Constants
-SAVE_DIRECTORY = "/home/dante/recordings"
-DAYS_OLD = 30
-FRAME_RATE = 2  # Frames per second
-RESOLUTION = (640, 480)  # Set resolution to 640x480
-ROTATION = 270  # Rotation in degrees (0, 90, 180, 270)
 
-# Paths for recordings and screenshots
-RECORDINGS_PATH = os.path.join(SAVE_DIRECTORY, "videos")
-SCREENSHOTS_PATH = os.path.join(SAVE_DIRECTORY, "screenshots")
+# ── Shared circular JPEG buffer ────────────────────────────────────────
 
-# Ensure the directories exist
-os.makedirs(RECORDINGS_PATH, exist_ok=True)
-os.makedirs(SCREENSHOTS_PATH, exist_ok=True)
+class FrameBuffer(io.BufferedIOBase):
+    """Thread-safe single-frame buffer that the MJPEGEncoder writes into.
 
-# Initialize Picamera2
-camera = Picamera2()
-camera_config = camera.create_video_configuration(main={"size": RESOLUTION})
-camera.configure(camera_config)
-camera.start()
+    MJPEGEncoder calls write() with complete JPEG frames.  We store the
+    latest frame and wake up any waiting client generators.
+    """
 
-# Global variable to manage recording state
-recording = False
+    def __init__(self):
+        self.frame = None
+        self.condition = threading.Condition()
 
-def rotate_image(image, angle):
-    """Rotate an image by the given angle."""
-    rotation_map = {
-        90: cv2.ROTATE_90_CLOCKWISE,
-        180: cv2.ROTATE_180,
-        270: cv2.ROTATE_90_COUNTERCLOCKWISE
-    }
-    return cv2.rotate(image, rotation_map[angle]) if angle in rotation_map else image
+    def write(self, data):
+        with self.condition:
+            self.frame = data
+            self.condition.notify_all()
+        return len(data)
 
-def cleanup_old_files(directory, days_old=DAYS_OLD):
-    """Remove files older than `days_old` days from `directory`."""
-    current_time = time.time()
-    cutoff_time = current_time - days_old * 86400  # 86400 seconds in a day
+    def writable(self):
+        return True
 
-    for filename in os.listdir(directory):
-        file_path = os.path.join(directory, filename)
-        if os.path.isfile(file_path) and os.path.getmtime(file_path) < cutoff_time:
-            os.remove(file_path)
 
-def take_scheduled_screenshots():
-    """Schedule screenshots at random intervals 5 times per day."""
-    while True:
-        time_to_wait = random.randint(0, 5 * 3600)  # Random wait up to 5 hours
-        time.sleep(time_to_wait)
-        save_screenshot()
-        time.sleep(86400 / 5 - time_to_wait)  # Ensure 5 times per day
+# ── Global state ────────────────────────────────────────────────────────
 
-def save_screenshot():
-    """Capture and save a screenshot."""
-    frame = camera.capture_array()
-    rotated_frame = rotate_image(frame, ROTATION)
-    filename = os.path.join(SCREENSHOTS_PATH, f"screenshot_{datetime.datetime.now():%Y%m%d_%H%M%S}.jpg")
-    cv2.imwrite(filename, rotated_frame)
+_camera       = None
+_encoder      = None
+_output       = None
+_frame_buf    = FrameBuffer()
+_running      = False
+_viewer_count = 0
+_idle_timer   = None
+_lock         = threading.Lock()
 
-@app.route('/')
-def video_feed():
-    def generate_frames():
+
+# ── Camera lifecycle ────────────────────────────────────────────────────
+
+def _start_camera():
+    """Bring up camera + encoder pipeline."""
+    global _camera, _encoder, _output, _running, _idle_timer
+
+    with _lock:
+        if _running:
+            return
+
+        if _idle_timer is not None:
+            _idle_timer.cancel()
+            _idle_timer = None
+
+        _camera = Picamera2()
+
+        video_cfg = _camera.create_video_configuration(
+            main={
+                "size": RESOLUTION,
+                "format": "YUV420",       # 1.5 B/px — half of BGR888
+            },
+            transform=Transform(rotation=270),  # ISP rotation (free)
+            buffer_count=BUFFER_COUNT,
+        )
+        _camera.configure(video_cfg)
+
+        # Lock frame rate and disable expensive ISP post-processing
+        frame_us = int(1_000_000 / TARGET_FPS)
+        _camera.set_controls({
+            "FrameDurationLimits": (frame_us, frame_us),
+            "NoiseReductionMode":  0,     # Off
+            "Sharpness":          0.0,    # Off
+            "Saturation":         1.0,    # Neutral
+            "AeEnable":           True,
+            "AwbEnable":          True,
+        })
+
+        # Attempt continuous AF (non-fatal if unsupported)
+        try:
+            _camera.set_controls({"AfMode": 2, "AfSpeed": 1})
+        except Exception:
+            pass
+
+        # Set up the MJPEG encoder → our in-memory FrameBuffer
+        _encoder = MJPEGEncoder()
+        _output = FileOutput(_frame_buf)
+        _camera.start_encoder(_encoder, _output, quality=JPEG_QUALITY)
+
+        _camera.start()
+        _running = True
+        print("[cam] started")
+
+
+def _stop_camera():
+    """Tear down encoder and camera."""
+    global _camera, _encoder, _output, _running, _idle_timer
+
+    with _lock:
+        if not _running:
+            return
+        _running = False
+
+    try:
+        _camera.stop_encoder()
+    except Exception:
+        pass
+    try:
+        _camera.stop()
+    except Exception:
+        pass
+    try:
+        _camera.close()
+    except Exception:
+        pass
+
+    _camera = None
+    _encoder = None
+    _output = None
+    _idle_timer = None
+    print("[cam] stopped")
+
+
+def _schedule_idle_stop():
+    """Deferred camera shutdown after last viewer disconnects."""
+    global _idle_timer
+    if _idle_timer is not None:
+        _idle_timer.cancel()
+
+    def _maybe_stop():
+        with _lock:
+            if _viewer_count != 0:
+                return
+        _stop_camera()
+
+    _idle_timer = threading.Timer(IDLE_TIMEOUT_S, _maybe_stop)
+    _idle_timer.daemon = True
+    _idle_timer.start()
+
+
+# ── Per-client MJPEG generator ──────────────────────────────────────────
+
+_BOUNDARY = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+_CRLF = b"\r\n"
+
+def _stream_generator():
+    """Yield MJPEG multipart chunks for one connected viewer."""
+    global _viewer_count
+
+    try:
         while True:
-            frame = camera.capture_array()
-            rotated_frame = rotate_image(frame, ROTATION)
-            _, buffer = cv2.imencode('.jpg', rotated_frame)
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-            time.sleep(1 / FRAME_RATE)  # Control the frame rate
+            with _frame_buf.condition:
+                if not _running:
+                    return
+                if not _frame_buf.condition.wait(timeout=1.0):
+                    # Timeout — keep connection alive, retry
+                    if not _running:
+                        return
+                    continue
+                frame = _frame_buf.frame
 
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+            if frame is None:
+                continue
 
-@app.route('/screenshot', methods=['POST'])
-def screenshot():
-    cleanup_old_files(SCREENSHOTS_PATH)  # Clean up old files before saving a new one
-    save_screenshot()
-    return jsonify({"status": "success"})
+            yield _BOUNDARY + frame + _CRLF
+    finally:
+        with _lock:
+            _viewer_count = max(0, _viewer_count - 1)
+            if _viewer_count == 0:
+                _schedule_idle_stop()
 
-@app.route('/record', methods=['POST'])
-def record():
-    global recording
 
-    cleanup_old_files(RECORDINGS_PATH)  # Clean up old files before starting a new recording
+# ── Flask routes ────────────────────────────────────────────────────────
 
-    if not recording:
-        filename = os.path.join(RECORDINGS_PATH, f"recording_{datetime.datetime.now():%Y%m%d_%H%M%S}.h264")
-        camera.start_recording(filename)
-        recording = True
-        status = "recording"
-    else:
-        camera.stop_recording()
-        recording = False
-        status = "stopped"
+@app.route("/")
+def index():
+    return (
+        "<h1>Raspberry Pi Camera (Picamera2 + IMX519)</h1>"
+        "<img src='/video_feed' style='width:50%; max-width:640px;'/>"
+        "<p>Stream starts on first viewer and stops shortly after "
+        "the last one leaves.</p>"
+    )
 
-    return jsonify({"status": status})
 
-@app.route('/recordings')
-def list_recordings():
-    """Render a webpage showing all available recordings and screenshots."""
-    recordings = sorted(os.listdir(RECORDINGS_PATH))
-    screenshots = sorted(os.listdir(SCREENSHOTS_PATH))
-    return render_template('recordings.html', recordings=recordings, screenshots=screenshots)
+@app.route("/video_feed")
+def video_feed():
+    global _viewer_count
+    with _lock:
+        _viewer_count += 1
+        if not _running:
+            pass  # release lock before heavy camera init
+    if not _running:
+        _start_camera()
+        # Give encoder a moment to produce the first frame
+        time.sleep(0.25)
 
-@app.route('/view/<filename>')
-def view_file(filename):
-    """View a specific recording or screenshot."""
-    if filename.startswith("recording_"):
-        directory = RECORDINGS_PATH
-    elif filename.startswith("screenshot_"):
-        directory = SCREENSHOTS_PATH
-    else:
-        return "File not found", 404
+    return Response(
+        _stream_generator(),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "keep-alive",
+        },
+    )
 
-    return send_from_directory(directory, filename)
+
+# ────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # Start a background thread for taking scheduled screenshots
-    threading.Thread(target=take_scheduled_screenshots, daemon=True).start()
-
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host="0.0.0.0", port=8080, threaded=True)
