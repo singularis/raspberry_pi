@@ -34,8 +34,9 @@ from picamera2.outputs import FileOutput
 from libcamera import Transform
 
 # ──── Tunables ──────────────────────────────────────────────────────────
+VERSION         = "1.2 (Wide View + Flip Fix)"
 RESOLUTION      = (640, 480)    # Sweet-spot for Pi Zero
-TARGET_FPS      = 15            # Achievable at 640×480 on Pi Zero
+TARGET_FPS      = 15            # Achievable at 640x480 on Pi Zero
 JPEG_QUALITY    = Quality.MEDIUM  # LOW/MEDIUM/HIGH/VERY_HIGH
 BUFFER_COUNT    = 2             # Minimum for smooth capture
 IDLE_TIMEOUT_S  = 5.0           # Seconds after last viewer → stop camera
@@ -101,7 +102,7 @@ def _start_camera():
                 "size": RESOLUTION,
                 "format": "YUV420",       # 1.5 B/px — half of BGR888
             },
-            transform=Transform(rotation=270),  # ISP rotation (free)
+            transform=Transform(hflip=True, vflip=True),  # 180° flip (right-side up, full FOV)
             buffer_count=BUFFER_COUNT,
         )
         _camera.configure(video_cfg)
@@ -216,8 +217,8 @@ def _stream_generator():
 @app.route("/")
 def index():
     return (
-        "<h1>Raspberry Pi Camera (Picamera2 + IMX519)</h1>"
-        "<img src='/video_feed' style='width:50%; max-width:640px;'/>"
+        f"<h1>Raspberry Pi Camera (Picamera2 + IMX519) - v{VERSION}</h1>"
+        "<img src='/video_feed' style='width:100%; max-width:100vw; height:auto;'/>"
         "<p>Stream starts on first viewer and stops shortly after "
         "the last one leaves.</p>"
     )
