@@ -69,3 +69,18 @@ journalctl -u flask_camera.service -f
 |----------|-------------|
 | `http://<pi-ip>:8080/` | HTML page with embedded live stream |
 | `http://<pi-ip>:8080/video_feed` | Raw MJPEG stream (for Home Assistant, etc.) |
+
+## WiFi watchdog
+
+Keeps the Pi on the LAN when WiFi drops (common on Pi Zero W).
+
+Every **5 minutes** it pings the router. If unreachable:
+
+1. Bounce `wlan0` (`nmcli` disconnect/connect)
+2. Restart NetworkManager
+3. After 3 failed cycles (~15 min): reboot (30 min cooldown)
+
+```bash
+./install_wifi_watchdog.sh
+journalctl -t wifi-watchdog -f
+```

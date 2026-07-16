@@ -1,0 +1,16 @@
+[Unit]
+Description=WiFi watchdog — ping router and recover wlan0
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+User=dante
+Group=dante
+ExecStart=/home/dante/raspberry_pi/wifi_watchdog.sh
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target
