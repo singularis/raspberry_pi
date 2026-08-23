@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Clips</title>
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+<div id="top"><a class="btn" href="/">Live</a><span>Clips (camera off)</span></div>
+<img id="p" alt="">
+<div id="list">__LIST__</div>
+<script>
+document.getElementById('list').onclick=function(e){
+  var b=e.target.closest('button[data-f]');
+  if(!b)return;
+  document.getElementById('p').src='/clip/'+encodeURIComponent(b.getAttribute('data-f'));
+};
+</script>
+</body>
+</html>

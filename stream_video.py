@@ -1,254 +1,357 @@
 #!/usr/bin/env python3
-"""
-Ultra-lean MJPEG streamer for Raspberry Pi Zero W + Arducam IMX519.
-───────────────────────────────────────────────────────────────────
-Hardware: single-core ARMv6 @ 1 GHz, 427 MB RAM, 64-128 MB GPU.
+"""Pi Zero W + Arducam IMX519: live MJPEG, record, clip playback."""
 
-Key design decisions (every byte and cycle matters):
-  ▸ NO OpenCV, NO numpy at runtime — saves ~80 MB RSS.
-  ▸ JPEG encoding via Picamera2's MJPEGEncoder which delegates to
-    the hardware-accelerated ISP / libjpeg-turbo internally, instead
-    of doing capture_array() → cvtColor() → imencode() on the CPU.
-  ▸ Rotation done by the ISP via libcamera Transform (zero CPU cost).
-  ▸ YUV420 main stream — 1.5 bytes/pixel vs 3 bytes/pixel (BGR888),
-    halving frame-buffer memory. The MJPEG encoder accepts YUV natively.
-  ▸ 2 buffers only (minimum for smooth pipeline, saves ~2 MB).
-  ▸ All ISP post-processing disabled (noise reduction, sharpening).
-  ▸ Single shared frame broadcast — encode once, fan out to N viewers.
-  ▸ Camera starts on first viewer, stops after last viewer leaves.
-  ▸ Flask with minimal middleware — no static files, no sessions.
-
-Endpoints:
-  GET /           → simple HTML page with embedded <img>
-  GET /video_feed → raw MJPEG stream
-"""
-
+import gc
 import io
-import time
+import os
+import struct
 import threading
+import time
+from datetime import datetime
 
-from flask import Flask, Response
+from flask import Flask, Response, jsonify, request, send_from_directory
+from libcamera import Transform
 from picamera2 import Picamera2
 from picamera2.encoders import MJPEGEncoder, Quality
 from picamera2.outputs import FileOutput
-from libcamera import Transform
 
-# ──── Tunables ──────────────────────────────────────────────────────────
-VERSION         = "1.2 (Wide View + Flip Fix)"
-RESOLUTION      = (640, 480)    # Sweet-spot for Pi Zero
-TARGET_FPS      = 15            # Achievable at 640x480 on Pi Zero
-JPEG_QUALITY    = Quality.MEDIUM  # LOW/MEDIUM/HIGH/VERY_HIGH
-BUFFER_COUNT    = 2             # Minimum for smooth capture
-IDLE_TIMEOUT_S  = 5.0           # Seconds after last viewer → stop camera
-# ────────────────────────────────────────────────────────────────────────
+HERE = os.path.dirname(os.path.abspath(__file__))
+WEB = os.path.join(HERE, "web")
+CLIPS = os.path.join(HERE, "recordings")
+RAW = (2328, 1748)          # IMX519 2×2 bin, full FOV
+LIVE = (1280, 960)
+FLIP = Transform(hflip=True, vflip=True)
+HDR = {"Cache-Control": "no-cache, no-store"}
+BOUND = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
 
-app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = None  # No request size limit needed
+app = Flask(__name__, static_folder=WEB, static_url_path="/web")
+
+_lock = threading.Lock()
+_cam = None
+_on = False
+_mode = None
+_nview = 0
+_idle = None
+_rec_f = None
+_rec_path = None
+_rec_t0 = None
+_rec_timer = None
+_rec_size = None
+_buf = None
 
 
-# ── Shared circular JPEG buffer ────────────────────────────────────────
-
-class FrameBuffer(io.BufferedIOBase):
-    """Thread-safe single-frame buffer that the MJPEGEncoder writes into.
-
-    MJPEGEncoder calls write() with complete JPEG frames.  We store the
-    latest frame and wake up any waiting client generators.
-    """
-
+class JpegBuf(io.BufferedIOBase):
     def __init__(self):
         self.frame = None
-        self.condition = threading.Condition()
+        self.ready = threading.Condition()
 
     def write(self, data):
-        with self.condition:
+        with self.ready:
             self.frame = data
-            self.condition.notify_all()
+            self.ready.notify_all()
         return len(data)
 
     def writable(self):
         return True
 
 
-# ── Global state ────────────────────────────────────────────────────────
+class RecFile(io.RawIOBase):
+    def __init__(self, path):
+        self.j = open(path, "wb", buffering=512 * 1024)
+        self.t = open(path[:-5] + ".ts", "wb", buffering=16 * 1024)
+        self.t0 = time.monotonic()
+        self.n = 0
 
-_camera       = None
-_encoder      = None
-_output       = None
-_frame_buf    = FrameBuffer()
-_running      = False
-_viewer_count = 0
-_idle_timer   = None
-_lock         = threading.Lock()
+    def write(self, data):
+        self.j.write(data)
+        self.t.write(struct.pack("<I", int((time.monotonic() - self.t0) * 1000)))
+        self.n += 1
+        if self.n >= 8:
+            self.j.flush()
+            self.t.flush()
+            self.n = 0
+        return len(data)
+
+    def writable(self):
+        return True
+
+    def close(self):
+        self.j.close()
+        self.t.close()
 
 
-# ── Camera lifecycle ────────────────────────────────────────────────────
+_buf = JpegBuf()
 
-def _start_camera():
-    """Bring up camera + encoder pipeline."""
-    global _camera, _encoder, _output, _running, _idle_timer
 
+def _mem_mb():
+    with open("/proc/meminfo") as f:
+        for line in f:
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / 1024.0
+    return 0.0
+
+
+def _close(cam):
+    if not cam:
+        return
+    if cam.started:
+        if cam.encoder:
+            cam.stop_encoder()
+        cam.stop()
+    cam.close()
+
+
+def _idle_off():
+    global _idle
+    if _idle:
+        _idle.cancel()
+        _idle = None
+
+
+def _rec():
+    return _rec_f is not None
+
+
+def _setup(cam, main, raw, record):
+    cam.configure(cam.create_video_configuration(
+        main={"size": main, "format": "YUV420"},
+        raw={"size": raw},
+        transform=FLIP,
+        buffer_count=2,
+        queue=False,
+    ))
+    lo, hi = (140000, 330000) if record else (55000, 125000)
+    cam.set_controls({
+        "FrameDurationLimits": (lo, hi),
+        "AeEnable": True,
+        "AwbEnable": True,
+        "Sharpness": 1.0,
+        "NoiseReductionMode": 0,
+    })
+    return Quality.HIGH if main[0] > 1920 else Quality.VERY_HIGH
+
+
+def _status():
+    return {
+        "recording": _rec(),
+        "elapsed_s": int(time.time() - _rec_t0) if _rec_t0 else 0,
+        "max_s": 1800,
+        "size": f"{_rec_size[0]}x{_rec_size[1]}" if _rec_size else None,
+        "file": os.path.basename(_rec_path) if _rec_path else None,
+    }
+
+
+def _end_file():
+    global _rec_f, _rec_path, _rec_t0, _rec_timer
+    if _rec_timer:
+        _rec_timer.cancel()
+        _rec_timer = None
+    if _rec_f:
+        _rec_f.close()
+        print("[rec] stopped", _rec_path)
+    _rec_f = _rec_path = _rec_t0 = None
+
+
+def cam_start(mode):
+    global _cam, _on, _mode, _rec_size
     with _lock:
-        if _running:
+        if _on or (mode == "live" and _rec()):
             return
+        _idle_off()
+        _mode = mode
 
-        if _idle_timer is not None:
-            _idle_timer.cancel()
-            _idle_timer = None
-
-        _camera = Picamera2()
-
-        video_cfg = _camera.create_video_configuration(
-            main={
-                "size": RESOLUTION,
-                "format": "YUV420",       # 1.5 B/px — half of BGR888
-            },
-            transform=Transform(hflip=True, vflip=True),  # 180° flip (right-side up, full FOV)
-            buffer_count=BUFFER_COUNT,
-        )
-        _camera.configure(video_cfg)
-
-        # Lock frame rate and disable expensive ISP post-processing
-        frame_us = int(1_000_000 / TARGET_FPS)
-        _camera.set_controls({
-            "FrameDurationLimits": (frame_us, frame_us),
-            "NoiseReductionMode":  0,     # Off
-            "Sharpness":          0.0,    # Off
-            "Saturation":         1.0,    # Neutral
-            "AeEnable":           True,
-            "AwbEnable":          True,
-        })
-
-        # Attempt continuous AF (non-fatal if unsupported)
-        try:
-            _camera.set_controls({"AfMode": 2, "AfSpeed": 1})
-        except Exception:
-            pass
-
-        # Set up the MJPEG encoder → our in-memory FrameBuffer
-        _encoder = MJPEGEncoder()
-        _output = FileOutput(_frame_buf)
-        _camera.start_encoder(_encoder, _output, quality=JPEG_QUALITY)
-
-        _camera.start()
-        _running = True
-        print("[cam] started")
+    cam = Picamera2()
+    if mode == "record":
+        mem = _mem_mb()
+        print("[cam] RAM", round(mem), "MB")
+        main = raw = (3840, 2160) if mem >= 180 else (RAW if mem >= 95 else (1920, 1080))
+        if main == (1920, 1080):
+            raw = (1920, 1080)
+        q = _setup(cam, main, raw, True)
+        cam.start_encoder(MJPEGEncoder(), FileOutput(_rec_f), quality=q)
+        size = main
+    else:
+        q = _setup(cam, LIVE, RAW, False)
+        cam.start_encoder(MJPEGEncoder(), FileOutput(_buf), quality=q)
+        size = LIVE
+    cam.start()
+    _cam, _on, _rec_size = cam, True, (size if mode == "record" else None)
+    print("[cam]", mode, size[0], "x", size[1])
 
 
-def _stop_camera():
-    """Tear down encoder and camera."""
-    global _camera, _encoder, _output, _running, _idle_timer
+def rec_begin():
+    global _rec_f, _rec_path, _rec_t0, _rec_timer
+    os.makedirs(CLIPS, exist_ok=True)
+    path = os.path.join(CLIPS, datetime.now().strftime("clip_%Y%m%d_%H%M%S.mjpg"))
+    _rec_f, _rec_path, _rec_t0 = RecFile(path), path, time.time()
 
+    def cap():
+        cam_stop(True)
+        print("[rec] 30 min")
+
+    _idle_off()
+    _rec_timer = threading.Timer(1800, cap)
+    _rec_timer.daemon = True
+    _rec_timer.start()
+    print("[rec]", path)
+
+
+def cam_stop(force=False):
+    global _cam, _on, _mode
     with _lock:
-        if not _running:
+        if not force and _rec():
             return
-        _running = False
-
-    try:
-        _camera.stop_encoder()
-    except Exception:
-        pass
-    try:
-        _camera.stop()
-    except Exception:
-        pass
-    try:
-        _camera.close()
-    except Exception:
-        pass
-
-    _camera = None
-    _encoder = None
-    _output = None
-    _idle_timer = None
-    print("[cam] stopped")
+        cam, _cam, _on, _mode = _cam, None, False, None
+    _close(cam)
+    with _lock:
+        if force:
+            _end_file()
+        _idle_off()
+    _buf.frame = None
+    gc.collect()
+    print("[cam] stop")
 
 
-def _schedule_idle_stop():
-    """Deferred camera shutdown after last viewer disconnects."""
-    global _idle_timer
-    if _idle_timer is not None:
-        _idle_timer.cancel()
+def _later_stop():
+    global _idle
+    if _rec() or _mode == "record":
+        return
+    _idle_off()
 
-    def _maybe_stop():
+    def go():
         with _lock:
-            if _viewer_count != 0:
+            if _nview or _rec() or _mode == "record":
                 return
-        _stop_camera()
+        cam_stop()
 
-    _idle_timer = threading.Timer(IDLE_TIMEOUT_S, _maybe_stop)
-    _idle_timer.daemon = True
-    _idle_timer.start()
+    _idle = threading.Timer(5, go)
+    _idle.daemon = True
+    _idle.start()
 
 
-# ── Per-client MJPEG generator ──────────────────────────────────────────
+def _clip(name):
+    if not name or "/" in name or "\\" in name or not name.endswith(".mjpg"):
+        return None
+    p = os.path.realpath(os.path.join(CLIPS, name))
+    return p if p.startswith(os.path.realpath(CLIPS) + os.sep) and os.path.isfile(p) else None
 
-_BOUNDARY = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-_CRLF = b"\r\n"
 
-def _stream_generator():
-    """Yield MJPEG multipart chunks for one connected viewer."""
-    global _viewer_count
+def _jpegs(path):
+    buf = b""
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                return
+            buf += chunk
+            while True:
+                a = buf.find(b"\xff\xd8")
+                if a < 0:
+                    buf = buf[-1:] if buf else b""
+                    break
+                b = buf.find(b"\xff\xd9", a + 2)
+                if b < 0:
+                    buf = buf[a:]
+                    break
+                yield buf[a:b + 2]
+                buf = buf[b + 2:]
 
+
+def _play(path):
+    ts = path[:-5] + ".ts"
+    times = None
+    if os.path.isfile(ts):
+        data = open(ts, "rb").read()
+        times = [struct.unpack_from("<I", data, i * 4)[0] / 1000.0 for i in range(len(data) // 4)]
+    t0 = time.monotonic()
+    for i, fr in enumerate(_jpegs(path)):
+        if times and i < len(times):
+            w = times[i] - (time.monotonic() - t0)
+            if w > 0:
+                time.sleep(min(w, 2))
+        else:
+            time.sleep(0.15)
+        yield BOUND + fr + b"\r\n"
+
+
+def _live():
+    global _nview
     try:
         while True:
-            with _frame_buf.condition:
-                if not _running:
+            if _mode == "record":
+                return
+            with _buf.ready:
+                if not _on:
                     return
-                if not _frame_buf.condition.wait(timeout=1.0):
-                    # Timeout — keep connection alive, retry
-                    if not _running:
-                        return
+                if not _buf.ready.wait(timeout=1):
                     continue
-                frame = _frame_buf.frame
-
-            if frame is None:
-                continue
-
-            yield _BOUNDARY + frame + _CRLF
+                fr = _buf.frame
+            if fr:
+                yield BOUND + fr + b"\r\n"
     finally:
         with _lock:
-            _viewer_count = max(0, _viewer_count - 1)
-            if _viewer_count == 0:
-                _schedule_idle_stop()
+            _nview = max(0, _nview - 1)
+            if _nview == 0 and not _rec():
+                _later_stop()
 
-
-# ── Flask routes ────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
-    return (
-        f"<h1>Raspberry Pi Camera (Picamera2 + IMX519) - v{VERSION}</h1>"
-        "<img src='/video_feed' style='width:100%; max-width:100vw; height:auto;'/>"
-        "<p>Stream starts on first viewer and stops shortly after "
-        "the last one leaves.</p>"
-    )
+    return send_from_directory(WEB, "index.html")
+
+
+@app.route("/clips")
+def clips():
+    cam_stop(True)
+    rows = []
+    if os.path.isdir(CLIPS):
+        for name in sorted(os.listdir(CLIPS), reverse=True):
+            if name.endswith(".mjpg"):
+                st = os.stat(os.path.join(CLIPS, name))
+                rows.append(
+                    f'<button type="button" data-f="{name}">{name}'
+                    f'<span>{datetime.fromtimestamp(st.st_mtime).strftime("%d %b %H:%M")} · {st.st_size/1048576:.1f} MB</span></button>'
+                )
+    html = open(os.path.join(WEB, "clips.html"), encoding="utf-8").read()
+    html = html.replace("__LIST__", "".join(rows) or '<p class="empty">No clips yet</p>')
+    return Response(html, mimetype="text/html", headers=HDR)
+
+
+@app.route("/clip/<name>")
+def clip(name):
+    path = _clip(name)
+    if not path:
+        return "not found", 404
+    return Response(_play(path), mimetype="multipart/x-mixed-replace; boundary=frame", headers=HDR)
+
+
+@app.route("/record")
+def record():
+    on = request.args.get("on")
+    if on in ("1", "true", "on"):
+        cam_stop(True)
+        time.sleep(0.3)
+        gc.collect()
+        rec_begin()
+        cam_start("record")
+    elif on in ("0", "false", "off"):
+        cam_stop(True)
+    return jsonify(_status())
 
 
 @app.route("/video_feed")
 def video_feed():
-    global _viewer_count
+    global _nview
+    if _rec() or _mode == "record":
+        return Response("recording", status=204)
+    if not _on:
+        cam_start("live")
+    if not _on:
+        return Response("camera off", status=503)
     with _lock:
-        _viewer_count += 1
-        if not _running:
-            pass  # release lock before heavy camera init
-    if not _running:
-        _start_camera()
-        # Give encoder a moment to produce the first frame
-        time.sleep(0.25)
+        _nview += 1
+    return Response(_live(), mimetype="multipart/x-mixed-replace; boundary=frame", headers=HDR)
 
-    return Response(
-        _stream_generator(),
-        mimetype="multipart/x-mixed-replace; boundary=frame",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-            "Connection": "keep-alive",
-        },
-    )
-
-
-# ────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, threaded=True)
+    app.run("0.0.0.0", 8080, threaded=True)
