@@ -55,27 +55,33 @@ class JpegBuf(io.BufferedIOBase):
         return True
 
 
-class RecFile(io.RawIOBase):
+class RecFile(io.BufferedIOBase):
     def __init__(self, path):
-        self.j = open(path, "wb", buffering=512 * 1024)
+        self.j = open(path, "wb", buffering=64 * 1024)
         self.t = open(path[:-5] + ".ts", "wb", buffering=16 * 1024)
         self.t0 = time.monotonic()
         self.n = 0
 
     def write(self, data):
         self.j.write(data)
-        self.t.write(struct.pack("<I", int((time.monotonic() - self.t0) * 1000)))
+        self.t.write(struct.pack("<I", max(0, int((time.monotonic() - self.t0) * 1000))))
         self.n += 1
         if self.n >= 8:
-            self.j.flush()
-            self.t.flush()
+            self.flush()
             self.n = 0
         return len(data)
 
     def writable(self):
         return True
 
+    def flush(self):
+        self.j.flush()
+        self.t.flush()
+
     def close(self):
+        if self.j.closed:
+            return
+        self.flush()
         self.j.close()
         self.t.close()
 
@@ -83,22 +89,11 @@ class RecFile(io.RawIOBase):
 _buf = JpegBuf()
 
 
-def _mem_mb():
-    with open("/proc/meminfo") as f:
-        for line in f:
-            if line.startswith("MemAvailable:"):
-                return int(line.split()[1]) / 1024.0
-    return 0.0
-
-
 def _close(cam):
-    if not cam:
+    if cam is None:
         return
-    if cam.started:
-        if cam.encoder:
-            cam.stop_encoder()
-        cam.stop()
     cam.close()
+    time.sleep(0.25)
 
 
 def _idle_off():
@@ -120,7 +115,7 @@ def _setup(cam, main, raw, record):
         buffer_count=2,
         queue=False,
     ))
-    lo, hi = (140000, 330000) if record else (55000, 125000)
+    lo, hi = (150000, 250000) if record else (55000, 125000)
     cam.set_controls({
         "FrameDurationLimits": (lo, hi),
         "AeEnable": True,
@@ -128,7 +123,7 @@ def _setup(cam, main, raw, record):
         "Sharpness": 1.0,
         "NoiseReductionMode": 0,
     })
-    return Quality.HIGH if main[0] > 1920 else Quality.VERY_HIGH
+    return Quality.HIGH
 
 
 def _status():
@@ -146,37 +141,54 @@ def _end_file():
     if _rec_timer:
         _rec_timer.cancel()
         _rec_timer = None
+    path = _rec_path
     if _rec_f:
         _rec_f.close()
-        print("[rec] stopped", _rec_path)
     _rec_f = _rec_path = _rec_t0 = None
+    if not path:
+        return
+    try:
+        if os.path.getsize(path) == 0:
+            os.unlink(path)
+            ts = path[:-5] + ".ts"
+            if os.path.isfile(ts):
+                os.unlink(ts)
+            print("[rec] removed empty", path)
+            return
+    except OSError:
+        pass
+    print("[rec] stopped", path)
 
 
 def cam_start(mode):
     global _cam, _on, _mode, _rec_size
     with _lock:
-        if _on or (mode == "live" and _rec()):
+        if mode == "live" and _rec():
+            return
+        if _on and _mode == mode:
             return
         _idle_off()
         _mode = mode
-
-    cam = Picamera2()
-    if mode == "record":
-        mem = _mem_mb()
-        print("[cam] RAM", round(mem), "MB")
-        main = raw = (3840, 2160) if mem >= 180 else (RAW if mem >= 95 else (1920, 1080))
-        if main == (1920, 1080):
-            raw = (1920, 1080)
-        q = _setup(cam, main, raw, True)
-        cam.start_encoder(MJPEGEncoder(), FileOutput(_rec_f), quality=q)
-        size = main
-    else:
-        q = _setup(cam, LIVE, RAW, False)
-        cam.start_encoder(MJPEGEncoder(), FileOutput(_buf), quality=q)
-        size = LIVE
-    cam.start()
-    _cam, _on, _rec_size = cam, True, (size if mode == "record" else None)
-    print("[cam]", mode, size[0], "x", size[1])
+        cam = _cam
+        if cam is None:
+            cam = Picamera2()
+            try:
+                q = _setup(cam, LIVE, RAW, mode == "record")
+                cam.start()
+            except Exception:
+                _close(cam)
+                _mode = None
+                raise
+            _cam, _on = cam, True
+        else:
+            lo, hi = (150000, 250000) if mode == "record" else (55000, 125000)
+            cam.set_controls({"FrameDurationLimits": (lo, hi)})
+            q = Quality.HIGH
+        cam.stop_encoder()
+        dest = _rec_f if mode == "record" else _buf
+        cam.start_encoder(MJPEGEncoder(), FileOutput(dest), quality=q)
+        _rec_size = LIVE if mode == "record" else None
+        print("[cam]", mode, LIVE[0], "x", LIVE[1])
 
 
 def rec_begin():
@@ -186,7 +198,7 @@ def rec_begin():
     _rec_f, _rec_path, _rec_t0 = RecFile(path), path, time.time()
 
     def cap():
-        cam_stop(True)
+        rec_off()
         print("[rec] 30 min")
 
     _idle_off()
@@ -210,6 +222,14 @@ def cam_stop(force=False):
     _buf.frame = None
     gc.collect()
     print("[cam] stop")
+
+
+def rec_off():
+    with _lock:
+        if _cam:
+            _cam.stop_encoder()
+        _end_file()
+    cam_start("live")
 
 
 def _later_stop():
@@ -329,13 +349,15 @@ def clip(name):
 def record():
     on = request.args.get("on")
     if on in ("1", "true", "on"):
-        cam_stop(True)
-        time.sleep(0.3)
-        gc.collect()
-        rec_begin()
-        cam_start("record")
+        if not _rec():
+            rec_begin()
+            try:
+                cam_start("record")
+            except Exception as exc:
+                print("[rec] start failed", exc)
+                cam_stop(True)
     elif on in ("0", "false", "off"):
-        cam_stop(True)
+        rec_off()
     return jsonify(_status())
 
 
@@ -345,7 +367,11 @@ def video_feed():
     if _rec() or _mode == "record":
         return Response("recording", status=204)
     if not _on:
-        cam_start("live")
+        try:
+            cam_start("live")
+        except Exception as exc:
+            print("[cam] live failed", exc)
+            return Response("camera off", status=503)
     if not _on:
         return Response("camera off", status=503)
     with _lock:
