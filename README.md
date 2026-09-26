@@ -2,6 +2,18 @@
 
 Ultra-lean MJPEG camera streamer built for the **Raspberry Pi Zero W** (single-core ARMv6, 427 MB RAM) paired with the **Arducam IMX519 16MP** camera.
 
+**Repo layout:** `rpi_camera/` streamer · `rpi_monitoring/` LCD + `AGENTS.md` · `setting/` config and wifi watchdog.
+
+## 2.4" SPI display
+
+LCDWiki MPI2411 (ILI9341 + XPT2046). Enable `dtparam=spi=on`. Do **not** install LCD-show.
+
+```bash
+python3 rpi_monitoring/hello_lcd.py
+```
+
+Pins and rotation: `setting/display.json`.
+
 ## Design
 
 Every byte and CPU cycle matters on Pi Zero. This streamer is built around three key principles:
@@ -32,8 +44,8 @@ Additional optimisations:
 ### 1. Install Dependencies
 
 ```bash
-chmod +x preinstall.sh
-sudo ./preinstall.sh
+chmod +x rpi_camera/preinstall.sh
+sudo ./rpi_camera/preinstall.sh
 ```
 
 ### 2. Hardware Configuration
@@ -50,7 +62,7 @@ Reboot after changes.
 ### 3. Deploy as a Systemd Service
 
 ```bash
-sudo cp flask_camera.service /etc/systemd/system/
+sudo cp rpi_camera/flask_camera.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable flask_camera.service
 sudo systemctl start flask_camera.service
@@ -81,6 +93,6 @@ Every **5 minutes** it pings the router. If unreachable:
 3. After 3 failed cycles (~15 min): reboot (30 min cooldown)
 
 ```bash
-./install_wifi_watchdog.sh
+./setting/install_wifi_watchdog.sh
 journalctl -t wifi-watchdog -f
 ```

@@ -1,0 +1,19 @@
+{
+  "sensor": "Arducam IMX519",
+  "overlay": "dtoverlay=imx519",
+  "gpu_mem": 128,
+  "live": [1280, 960],
+  "raw_bin": [2328, 1748],
+  "format": "YUV420",
+  "buffer_count": 2,
+  "flip": { "hflip": true, "vflip": true },
+  "listen": ["0.0.0.0", 8080],
+  "record": {
+    "max_s": 1800,
+    "same_size_as_live": true,
+    "reuse_camera_swap_encoder_only": true,
+    "never": ["1920x1080 realloc", "3840x2160", "close+reopen for rec"]
+  },
+  "clips_dir": "rpi_camera/recordings",
+  "service": "flask_camera.service"
+}

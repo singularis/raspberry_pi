@@ -1,0 +1,13 @@
+{
+  "hostname": "dante-pi",
+  "user": "dante",
+  "ip": "192.168.0.89",
+  "board": "Raspberry Pi Zero W",
+  "ram_mb": 364,
+  "os": "Raspberry Pi OS Bookworm armv6l",
+  "repo_on_pi": "/home/dante/raspberry_pi",
+  "ssh": "dante@192.168.0.89",
+  "live_url": "http://192.168.0.89:8080/",
+  "deploy": "scp files then sudo systemctl restart flask_camera.service",
+  "dev_machine": "racoon (x86), not the Pi"
+}

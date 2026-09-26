@@ -1,4 +1,5 @@
 recordings/
+rpi_camera/recordings/
 __pycache__/
 *.pyc
 *.pyo

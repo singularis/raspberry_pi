@@ -1,0 +1,13 @@
+{
+  "iface": "wlan0",
+  "router": "192.168.0.1",
+  "ping_count": 3,
+  "ping_wait_s": 3,
+  "max_fails": 3,
+  "reboot_cooldown_s": 1800,
+  "state_dir": "/var/lib/wifi-watchdog",
+  "timer": "every 5 min, 2 min after boot",
+  "install": "./setting/install_wifi_watchdog.sh",
+  "service": "wifi-watchdog.service",
+  "script": "setting/wifi_watchdog.sh"
+}
