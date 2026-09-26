@@ -24,11 +24,21 @@
     "raw_max": 3900,
     "z_min": 80,
     "irq_active": "low",
-    "any_tap_triggers_test": true
+    "any_tap_triggers_test": false
+  },
+  "ui": {
+    "collector_url": "http://192.168.0.124:8000/api/display",
+    "refresh_s": 5,
+    "refresh_s_comment": "5 while debugging; set to 60 after the on-device journeys are signed off",
+    "idle_s": 5,
+    "night": {"from": 23, "to": 7, "tz": "Europe/London"},
+    "brightness": {"day": 7, "night": 1, "scale": 8},
+    "day_fill": true,
+    "night_style": "red_text"
   },
   "boot": {
     "need": ["dtparam=spi=on"],
     "do_not_install": "goodtft LCD-show / LCD24-3A+-show (fights camera KMS)"
   },
-  "run": "python3 rpi_monitoring/hello_lcd.py"
+  "run": "lcd-monitor.service -> rpi_monitoring/display/lcd-monitor"
 }

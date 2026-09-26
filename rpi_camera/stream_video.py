@@ -361,6 +361,107 @@ def record():
     return jsonify(_status())
 
 
+def _read(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _mem():
+    total = free = None
+    text = _read("/proc/meminfo") or ""
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        if parts[0] == "MemTotal:":
+            total = int(parts[1]) // 1024
+        elif parts[0] == "MemAvailable:":
+            free = int(parts[1]) // 1024
+    return total, free
+
+
+def _disk():
+    try:
+        st = os.statvfs("/")
+    except OSError:
+        return None, None
+    total = st.f_blocks * st.f_frsize // (1024 * 1024)
+    free = st.f_bavail * st.f_frsize // (1024 * 1024)
+    return total, free
+
+
+def _rssi():
+    text = _read("/proc/net/wireless") or ""
+    for line in text.splitlines():
+        if "wlan" not in line:
+            continue
+        parts = line.replace(".", " ").split()
+        if len(parts) >= 4:
+            try:
+                return int(float(parts[3]))
+            except ValueError:
+                return None
+    return None
+
+
+def _unit(name):
+    try:
+        import subprocess
+        r = subprocess.run(
+            ["systemctl", "is-active", name],
+            capture_output=True, text=True, timeout=2,
+        )
+        return (r.stdout or "").strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _clips():
+    n = size = 0
+    if not os.path.isdir(CLIPS):
+        return n, size
+    for name in os.listdir(CLIPS):
+        if not name.endswith(".mjpg"):
+            continue
+        n += 1
+        try:
+            size += os.path.getsize(os.path.join(CLIPS, name))
+        except OSError:
+            pass
+    return n, size
+
+
+@app.route("/health")
+def health():
+    """Files and process state only. Must not touch Picamera2."""
+    temp_raw = _read("/sys/class/thermal/thermal_zone0/temp")
+    temp = int(temp_raw) / 1000 if temp_raw and temp_raw.isdigit() else None
+    total, free = _mem()
+    disk_total, disk_free = _disk()
+    clips_n, clips_b = _clips()
+    return jsonify({
+        "temp_c": temp,
+        "ram_mb": total,
+        "ram_free_mb": free,
+        "sd_mb": disk_total,
+        "sd_free_mb": disk_free,
+        "throttled": _read("/sys/devices/platform/soc/soc:firmware/get_throttled"),
+        "wifi_rssi": _rssi(),
+        "clips": clips_n,
+        "clips_bytes": clips_b,
+        "camera": _status(),
+        "units": {
+            "flask_camera": _unit("flask_camera.service"),
+            "wifi_watchdog": _unit("wifi-watchdog.timer"),
+            "motor_hours": _unit("motor-hours.service"),
+            "lcd_monitor": _unit("lcd-monitor.service"),
+        },
+    })
+
+
 @app.route("/video_feed")
 def video_feed():
     global _nview

@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: lcd-collector
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/singularis/raspberry_pi.git
+    targetRevision: HEAD
+    path: rpi_monitoring/collector/chart
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: lcd-monitor
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

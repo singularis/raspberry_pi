@@ -1,0 +1,57 @@
+name: lcd-collector
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - rpi_monitoring/collector/**
+      - .github/workflows/lcd-collector.yaml
+  workflow_dispatch:
+
+# A tag-pin commit must not build again.
+concurrency:
+  group: lcd-collector-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    # Chater's self-hosted runners are registered on that repo only.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image tag
+        run: echo "TAG=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        run: |
+          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/lcd-collector"
+          docker build \
+            -t "${IMAGE}:${TAG}" \
+            -t "${IMAGE}:latest" \
+            rpi_monitoring/collector
+          docker push "${IMAGE}:${TAG}"
+          docker push "${IMAGE}:latest"
+
+      - name: Pin the image tag for Argo
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          sed -i "s/^  tag: .*/  tag: \"${TAG}\"/" rpi_monitoring/collector/chart/values.yaml
+          git add rpi_monitoring/collector/chart/values.yaml
+          if git diff --staged --quiet; then
+            echo "Tag already pinned."
+            exit 0
+          fi
+          git commit -m "chore(lcd-collector): pin ${TAG} [skip ci]"
+          git push

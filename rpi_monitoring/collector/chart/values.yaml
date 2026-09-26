@@ -1,0 +1,25 @@
+replicaCount: 2
+
+image:
+  repository: docker.io/singularis314/lcd-collector
+  pullPolicy: Always
+  # GitHub Actions replaces this with the short commit sha on main.
+  tag: latest
+
+namespace: lcd-monitor
+
+service:
+  type: LoadBalancer
+  port: 8000
+  loadBalancerIP: "192.168.0.124"
+  externalTrafficPolicy: Local
+
+refreshSeconds: 60
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 160Mi
