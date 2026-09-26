@@ -4,7 +4,7 @@ image:
   repository: docker.io/singularis314/lcd-collector
   pullPolicy: Always
   # GitHub Actions replaces this with the short commit sha on main.
-  tag: "a1f963d"
+  tag: "1beb6f4"
 
 namespace: lcd-monitor
 
