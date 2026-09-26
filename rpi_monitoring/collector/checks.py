@@ -6,6 +6,8 @@ from model import tile, worst
 def node_state(ready, cpu, ram_pct, disk_pct, temp, free_gb=None, pressure=False, majfault=False):
     if ready is False:
         return "crit"
+    if all(v is None for v in (cpu, ram_pct, disk_pct, temp, free_gb)):
+        return "stale"
     states = []
     if disk_pct is not None and disk_pct > 95:
         states.append("crit")
@@ -40,6 +42,8 @@ def gpu_state(on, should_on, vllm_ready, vllm_late, claw_ok, temp):
 
 
 def pi_state(temp, ram_free, sd_pct, throttled_now, throttled_boot):
+    if temp is None and ram_free is None and sd_pct is None and not throttled_now and not throttled_boot:
+        return "stale"
     states = ["ok"]
     if throttled_now or (ram_free is not None and ram_free < 30) or (sd_pct is not None and sd_pct > 95):
         states.append("crit")
@@ -67,8 +71,8 @@ def backup_state(last_ok, overdue, partial, capacity_bad, smart_bad, running):
     return "ok"
 
 
-def net_state(router_up, dns_up, loss, ping_ms, dns_ms, rssi):
-    if not router_up or not dns_up:
+def net_state(router_up, dns_up, loss, ping_ms, dns_ms, rssi, internet=True):
+    if not router_up or not dns_up or not internet:
         return "crit"
     states = ["ok"]
     if (loss is not None and loss > 2) or (ping_ms is not None and ping_ms > 80) or (dns_ms is not None and dns_ms > 200) or (rssi is not None and rssi < -75):
@@ -139,7 +143,7 @@ def build(facts):
         _backup_tile(bak),
         tile(
             "network", "NETWORK",
-            net_state(net.get("router", True), net.get("dns", True), net.get("loss"), net.get("ping_ms"), net.get("dns_ms"), net.get("rssi")),
+            net_state(net.get("router", True), net.get("dns", True), net.get("loss"), net.get("ping_ms"), net.get("dns_ms"), net.get("rssi"), net.get("internet", True)),
             big=_ms(net.get("ping_ms")),
             l2="dns " + _ms(net.get("dns_ms")),
             l3="wifi " + (str(net.get("rssi")) + "dBm" if net.get("rssi") is not None else "--"),
@@ -154,10 +158,12 @@ def _gpu_tile(gpu):
     should = bool(gpu.get("should_on"))
     claw_ok = gpu.get("claw_ok")
     st = gpu_state(on, should, gpu.get("vllm"), gpu.get("vllm_late"), claw_ok, gpu.get("temp"))
+    watts = gpu.get("watts")
+    watt_s = "" if watts is None else " " + str(int(round(watts))) + "W"
     if not on:
         big, l2 = "OFF", "since " + (gpu.get("off_since") or "--")
     else:
-        big, l2 = _temp(gpu.get("temp")), "vllm " + ("up" if gpu.get("vllm") else "down")
+        big, l2 = _temp(gpu.get("temp")), "vllm " + ("up" if gpu.get("vllm") else "down") + watt_s
     pages = [{"rows": [[ln, ""] for ln in (gpu.get("claw_lines") or ["openclaw --"])]}]
     if not on:
         pages.append({"actions": [{

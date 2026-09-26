@@ -10,7 +10,7 @@ from checks import (
     node_state,
     pi_state,
 )
-from fetch import mint, should_gpu_on, throttled_flags
+from fetch import dish_count, mint, should_gpu_on, throttled_flags
 from model import snap
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -26,6 +26,8 @@ def test_states():
     assert gpu_state(True, True, False, True, True, 40) == "crit"
     assert gpu_state(True, True, True, False, False, 40) == "warn"
     assert pi_state(47, 174, 40, False, False) == "ok"
+    assert pi_state(None, None, None, False, False) == "stale"
+    assert node_state(True, None, None, None, None) == "stale"
     assert pi_state(47, 20, 40, True, False) == "crit"
     assert eater_state(False, 10, True, True, False, False) == "crit"
     assert eater_state(True, 1500, False, True, False, False) == "warn"
@@ -45,6 +47,10 @@ def test_claw_never_crit():
     tiles = build({"gpu": {"on": True, "should_on": True, "vllm": True, "claw_ok": False, "claw_lines": lines, "temp": 40}})
     gpu = next(t for t in tiles if t["id"] == "gpu")
     assert gpu["state"] == "warn"
+
+
+def test_protobuf_dish_count():
+    assert dish_count(b"\x0a\x00\x0a\x00") == 2
 
 
 def test_snap_and_jwt():

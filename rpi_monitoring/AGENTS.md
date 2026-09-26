@@ -37,7 +37,7 @@ Camera code stays in `rpi_camera/`. Display code stays here. Wifi and tunables s
 
 `rpi_monitoring/collector/` — FastAPI. Same delivery as Backepr and Chater: GitHub Actions (`.github/workflows/lcd-collector.yaml`) builds on the self-hosted runner and pushes `docker.io/singularis314/lcd-collector:<short-sha>` plus `:latest`, then pins `chart/values.yaml` with `[skip ci]`. Argo Application `rpi_monitoring/collector/argo/application.yaml` syncs `rpi_monitoring/collector/chart` (not a template inside the chart). Do not `kubectl apply` the chart by hand.
 
-Namespace `lcd-monitor`, LoadBalancer `192.168.0.124:8000`, `externalTrafficPolicy: Local`, 2 replicas, Lease `lcd-collector`, readiness is the leader. Repo is public, so Argo uses `https://github.com/singularis/raspberry_pi.git` with no deploy key. Actions needs repo secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (same names as Chater).
+Namespace `lcd-monitor`, LoadBalancer `192.168.0.124:8000` (pod listens on 8010, host network, same pattern as Backepr, so LAN checks leave from the node IP). `externalTrafficPolicy: Local`, 2 replicas, Lease `lcd-collector`. A pod is Ready once it has a snapshot; only the leader collects. Repo is public, so Argo uses `https://github.com/singularis/raspberry_pi.git` with no deploy key. Actions needs repo secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (same names as Chater).
 
 - `GET /api/display` view-model schema 1. `POST /api/actions` only from `192.168.0.89` and `192.168.0.10` (`wake`, `backup`), fire-and-forget so WoL does not block the Pi
 - Node metrics from Prometheus `prometheus.lens-metrics.svc` (`kubernetes_node` racoon / racoon-worker / racoon-gpu). Ready/pressure from the node API. Backup and wake via Backepr `http://192.168.0.122:8000`

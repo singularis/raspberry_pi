@@ -13,6 +13,8 @@ spec:
       labels:
         app: lcd-collector
     spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       serviceAccountName: lcd-collector
       affinity:
         podAntiAffinity:
@@ -29,7 +31,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: 8000
+              containerPort: 8010
               protocol: TCP
           env:
             - name: POD_NAME

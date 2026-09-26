@@ -16,7 +16,7 @@ VLLM = os.environ.get("VLLM_URL", "http://192.168.0.160:8000/health")
 EATER_PROD = os.environ.get("EATER_PROD_URL", "https://chater.singularis.work/eater_get_today")
 EATER_DEV = os.environ.get("EATER_DEV_URL", "https://chater.singularis.work/dev/eater_get_today")
 EATER_PROD_HOP = os.environ.get("EATER_PROD_HOP", "http://chater-ui.chater-ui.svc.cluster.local:5000/eater_get_today")
-EATER_DEV_HOP = os.environ.get("EATER_DEV_HOP", "http://chater-ui-dev.chater-ui-dev.svc.cluster.local:5000/eater_get_today")
+EATER_DEV_HOP = os.environ.get("EATER_DEV_HOP", "http://chater-ui-dev.chater-ui-dev.svc.cluster.local:5000/dev/eater_get_today")
 HEALTHZ = os.environ.get("EATER_HEALTHZ", "https://chater.singularis.work/healthz")
 SYNTH_EMAIL = "singularis314@gmail.com"
 UA = "lcd-synthetic"
@@ -44,12 +44,13 @@ def _series(node, query):
 
 
 def node_metrics(node):
-    cpu = _series(node, f'100 - (avg(rate(node_cpu_seconds_total{{mode="idle",kubernetes_node="{node}"}}[5m])) * 100)')
+    # avg/max without "by (kubernetes_node)" drop the label and the sample is missed.
+    cpu = _series(node, f'100 - (avg by (kubernetes_node) (rate(node_cpu_seconds_total{{mode="idle",kubernetes_node="{node}"}}[5m])) * 100)')
     avail = _series(node, f'node_memory_MemAvailable_bytes{{kubernetes_node="{node}"}}')
     total = _series(node, f'node_memory_MemTotal_bytes{{kubernetes_node="{node}"}}')
     disk_avail = _series(node, f'node_filesystem_avail_bytes{{kubernetes_node="{node}",mountpoint="/",fstype!="tmpfs"}}')
     disk_size = _series(node, f'node_filesystem_size_bytes{{kubernetes_node="{node}",mountpoint="/",fstype!="tmpfs"}}')
-    temp = _series(node, f'max(node_hwmon_temp_celsius{{kubernetes_node="{node}"}})')
+    temp = _series(node, f'max by (kubernetes_node) (node_hwmon_temp_celsius{{kubernetes_node="{node}",chip=~"platform_coretemp.*",sensor="temp1"}})')
     ram_pct = (100 * (1 - avail / total)) if avail and total else None
     disk_pct = (100 * (1 - disk_avail / disk_size)) if disk_avail and disk_size else None
     free_gb = (avail / (1024 ** 3)) if avail else None
@@ -136,7 +137,7 @@ def _secret(ns, name):
         r.raise_for_status()
         import base64
         raw = r.json()["data"].get("JWT_SECRET")
-        return base64.b64decode(raw).decode() if raw else None
+        return base64.b64decode(raw).decode().strip() if raw else None
     except Exception:
         return None
 
@@ -150,18 +151,65 @@ def mint(secret):
     )
 
 
+def _varint(buf, i):
+    n = s = 0
+    while i < len(buf):
+        b = buf[i]
+        i += 1
+        n |= (b & 0x7F) << s
+        if not b & 0x80:
+            return n, i
+        s += 7
+    return n, i
+
+
+def dish_count(buf):
+    """Count TodayFood.dishes_today (field 1) from chater's protobuf reply."""
+    i = n = 0
+    while i < len(buf):
+        key, j = _varint(buf, i)
+        if j == i:
+            break
+        i = j
+        field, wt = key >> 3, key & 7
+        if wt == 0:
+            _, i = _varint(buf, i)
+        elif wt == 1:
+            i += 8
+        elif wt == 5:
+            i += 4
+        elif wt == 2:
+            ln, i = _varint(buf, i)
+            if field == 1:
+                n += 1
+            i += ln
+        else:
+            break
+    return n
+
+
 def _get_eater(url, token):
     t0 = time.monotonic()
-    r = httpx.get(url, headers={"Authorization": "Bearer " + token, "User-Agent": UA}, timeout=8)
+    try:
+        r = httpx.get(url, headers={"Authorization": "Bearer " + token, "User-Agent": UA}, timeout=15)
+    except Exception as exc:
+        return False, None, None, type(exc).__name__
     ms = int((time.monotonic() - t0) * 1000)
     dishes = None
     if r.status_code == 200:
-        body = r.json()
-        if isinstance(body, list):
-            dishes = len(body)
-        elif isinstance(body, dict):
-            dishes = body.get("count") or len(body.get("dishes") or body.get("items") or [])
-    return r.status_code == 200, ms, dishes
+        ctype = (r.headers.get("content-type") or "").lower()
+        if "protobuf" in ctype or (r.content and r.content[:1] == b"\n"):
+            dishes = dish_count(r.content)
+        else:
+            try:
+                body = r.json()
+            except Exception:
+                body = None
+            if isinstance(body, list):
+                dishes = len(body)
+            elif isinstance(body, dict):
+                dishes = body.get("count") or len(body.get("dishes") or body.get("items") or [])
+    return r.status_code == 200, ms, dishes, str(r.status_code)
 
 
 def eater():
@@ -174,40 +222,27 @@ def eater():
     except Exception:
         out["health_ok"] = False
     if prod_secret:
-        try:
-            ok, ms, dishes = _get_eater(EATER_PROD, mint(prod_secret))
-            out.update(prod_ok=ok, prod_ms=ms, dishes=dishes, hop="public")
-            if not ok:
-                ok2, ms2, dishes2 = _get_eater(EATER_PROD_HOP, mint(prod_secret))
-                out.update(prod_ok=ok2, prod_ms=ms2, dishes=dishes2, hop="chater-ui.chater-ui:5000")
-        except Exception:
-            try:
-                ok2, ms2, dishes2 = _get_eater(EATER_PROD_HOP, mint(prod_secret))
-                out.update(prod_ok=ok2, prod_ms=ms2, dishes=dishes2, hop="chater-ui.chater-ui:5000")
-            except Exception:
-                out["hop"] = "chater-ui.chater-ui:5000 failed"
+        ok, ms, dishes, code = _get_eater(EATER_PROD, mint(prod_secret))
+        out.update(prod_ok=ok, prod_ms=ms, dishes=dishes, hop="public " + code)
+        if not ok:
+            ok2, ms2, dishes2, code2 = _get_eater(EATER_PROD_HOP, mint(prod_secret))
+            out.update(prod_ok=ok2, prod_ms=ms2, dishes=dishes2, hop="chater-ui:5000 " + code2)
     if dev_secret:
-        try:
-            ok, _, _ = _get_eater(EATER_DEV, mint(dev_secret))
-            out["dev_ok"] = ok
-            if not ok:
-                ok2, _, _ = _get_eater(EATER_DEV_HOP, mint(dev_secret))
-                out["dev_ok"] = ok2
-                out["hop"] = (out["hop"] + " dev:chater-ui-dev").strip()
-        except Exception:
-            try:
-                ok2, _, _ = _get_eater(EATER_DEV_HOP, mint(dev_secret))
-                out["dev_ok"] = ok2
-                out["hop"] = (out["hop"] + " dev:chater-ui-dev").strip()
-            except Exception:
-                out["dev_ok"] = False
+        ok, _, _, code = _get_eater(EATER_DEV, mint(dev_secret))
+        out["dev_ok"] = ok
+        if not ok:
+            ok2, _, _, code2 = _get_eater(EATER_DEV_HOP, mint(dev_secret))
+            out["dev_ok"] = ok2
+            out["hop"] = (out["hop"] + " dev:" + code2).strip()
+    out["argo_bad"] = argo_bad()
     return out
 
 
-def ping_ms(host, timeout=1):
+def tcp_ms(host, port, timeout=1):
+    """Same reachability test Backepr uses: a short TCP connect, not ICMP."""
     t0 = time.monotonic()
     try:
-        socket.create_connection((host, 53 if host.endswith("91") or host.endswith("92") else 80), timeout).close()
+        socket.create_connection((host, port), timeout).close()
         return int((time.monotonic() - t0) * 1000), True
     except Exception:
         return None, False
@@ -246,8 +281,32 @@ def assemble():
     if not gpu_node:
         on = bool(gpu_m.get("cpu") is not None or vllm_up())
     claw_lines, claw_ok = [], None
+    gpu_temp = gpu_m.get("temp") if on else None
+    gpu_watts = None
     if on:
-        claw_lines, claw_ok = openclaw_report()
+        claw_lines, claw_ok, extra = openclaw_report()
+        if extra.get("temp") is not None:
+            gpu_temp = extra["temp"]
+        gpu_watts = extra.get("watts")
+    notes = _notes()
+    spark = list(notes.get("worker") or [])
+    if wrk.get("free_gb") is not None:
+        spark = (spark + [round(wrk["free_gb"], 2)])[-16:]
+        notes["worker"] = spark
+    wrk["spark"] = spark
+    should = should_gpu_on()
+    vllm = vllm_up() if on else False
+    since = notes.get("vllm_down_since")
+    now_ts = time.time()
+    if on and should and not vllm:
+        if not since:
+            since = now_ts
+        notes["vllm_down_since"] = since
+        vllm_late = now_ts - float(since) > 900
+    else:
+        notes["vllm_down_since"] = None
+        vllm_late = False
+    _save_notes(notes)
     pi = pi_health()
     now_t, boot_t = throttled_flags(pi.get("throttled"))
     ram_free = pi.get("ram_free_mb")
@@ -266,8 +325,9 @@ def assemble():
         except ValueError:
             age_d = None
     storage = dash.get("storage") or {}
-    ping, router = ping_ms("192.168.0.1")
-    dns_ms, dns_ok = ping_ms("192.168.0.91")
+    ping, router = tcp_ms("192.168.0.1", 80)
+    dns_ms, dns_ok = tcp_ms("192.168.0.91", 53)
+    _, internet = tcp_ms("1.1.1.1", 443)
     return {
         "nodes": {
             "racoon": rac,
@@ -276,9 +336,10 @@ def assemble():
         "gpu": {
             "on": on,
             "should_on": should_gpu_on(),
-            "vllm": vllm_up() if on else False,
-            "vllm_late": False,
-            "temp": gpu_m.get("temp") if on else None,
+            "vllm": vllm,
+            "vllm_late": vllm_late,
+            "temp": gpu_temp,
+            "watts": gpu_watts,
             "claw_ok": claw_ok,
             "claw_lines": claw_lines,
             "off_since": None if on else "schedule",
@@ -296,7 +357,7 @@ def assemble():
             "overdue": age_d is not None and age_d > 8,
             "partial": last.get("status") not in (None, "success", "running"),
             "capacity_bad": storage.get("capacity_ok") is False,
-            "smart_bad": False,
+            "smart_bad": smart_bad(),
             "running": bool(state.get("backup_running")),
             "age_d": age_d,
             "next": _short(dash.get("tiers")),
@@ -309,6 +370,7 @@ def assemble():
             "ping_ms": ping,
             "dns_ms": dns_ms,
             "rssi": pi.get("wifi_rssi"),
+            "internet": internet,
         },
         "camera": {
             "recording": bool(cam.get("recording")),
@@ -328,23 +390,106 @@ def _short(tiers):
     return ""
 
 
+def argo_bad():
+    """Warn when a Chater or Eater Argo app is degraded. Same objects Argo already tracks."""
+    token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    if not os.path.exists(token_path):
+        return False
+    try:
+        token = open(token_path).read()
+        r = httpx.get(
+            "https://kubernetes.default.svc/apis/argoproj.io/v1alpha1/namespaces/argocd/applications",
+            headers={"Authorization": "Bearer " + token},
+            verify="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+            timeout=4,
+        )
+        r.raise_for_status()
+        for item in r.json().get("items", []):
+            name = item.get("metadata", {}).get("name", "")
+            if "eater" not in name and "chater" not in name:
+                continue
+            health = ((item.get("status") or {}).get("health") or {}).get("status")
+            if health not in (None, "Healthy"):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def smart_bad():
+    try:
+        rows = httpx.get(BACKEPR + "/api/health/smart", timeout=8).json()
+    except Exception:
+        return False
+    if not isinstance(rows, list):
+        return False
+    return any(isinstance(row, dict) and row.get("healthy") is False for row in rows)
+
+
+def _notes():
+    try:
+        from lease import load_notes
+        return load_notes()
+    except Exception:
+        return {}
+
+
+def _save_notes(data):
+    try:
+        from lease import save_notes
+        save_notes(data)
+    except Exception:
+        pass
+
+
+def _gpu_key():
+    path = os.environ.get("GPU_SSH_KEY", "/tmp/gpu_ssh_key")
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return path
+    token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    if not os.path.exists(token_path):
+        return None
+    try:
+        import base64
+        token = open(token_path).read()
+        r = httpx.get(
+            "https://kubernetes.default.svc/api/v1/namespaces/backepr/secrets/backepr-secrets",
+            headers={"Authorization": "Bearer " + token},
+            verify="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+            timeout=4,
+        )
+        r.raise_for_status()
+        raw = r.json()["data"].get("SSH_PRIVATE_KEY")
+        if not raw:
+            return None
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(base64.b64decode(raw))
+        os.chmod(path, 0o600)
+        return path
+    except Exception:
+        return None
+
+
 def openclaw_report():
-    """SSH once per refresh when the GPU node is up. Missing key is a warning, not a crit."""
+    """SSH with Backepr's key. OpenClaw is a warning. nvidia-smi supplies GPU temp and watts."""
     from checks import claw_lines
-    key = os.environ.get("GPU_SSH_KEY", "/secrets/gpu_ssh/id_ed25519")
-    if not os.path.exists(key):
-        return ["openclaw: no ssh key"], False
+    key = _gpu_key()
+    if not key:
+        return ["openclaw: no ssh key"], False, {}
     import subprocess
     try:
         r = subprocess.run(
-            ["ssh", "-i", key, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "dante@192.168.1.5",
-             "openclaw health --json; echo '---SPLIT---'; openclaw status --json"],
-            capture_output=True, text=True, timeout=12,
+            ["ssh", "-i", key, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+             "-o", "UserKnownHostsFile=/tmp/known_hosts", "-o", "ConnectTimeout=5",
+             "dante@192.168.1.5",
+             "openclaw health --json; echo '---SPLIT---'; openclaw status --json; echo '---SPLIT---'; nvidia-smi --query-gpu=temperature.gpu,power.draw --format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=20,
         )
     except Exception:
-        return ["openclaw: ssh failed"], False
+        return ["openclaw: ssh failed"], False, {}
     if r.returncode != 0:
-        return ["openclaw: ssh failed"], False
+        return ["openclaw: ssh failed"], False, {}
     import json
     parts = (r.stdout or "").split("---SPLIT---")
     health = status = None
@@ -357,7 +502,18 @@ def openclaw_report():
             status = json.loads(parts[1])
         except Exception:
             status = None
-    return claw_lines(health, status)
+    extra = {}
+    if len(parts) > 2:
+        bits = parts[2].strip().split(",")
+        if bits and bits[0].strip().replace(".", "", 1).isdigit():
+            extra["temp"] = float(bits[0])
+        if len(bits) > 1:
+            try:
+                extra["watts"] = float(bits[1].strip().split()[0])
+            except ValueError:
+                pass
+    lines, ok = claw_lines(health, status)
+    return lines, ok, extra
 
 
 def fire(action):

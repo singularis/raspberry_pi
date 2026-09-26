@@ -75,6 +75,30 @@ def publish(body):
     _put(obj)
 
 
+def load_notes():
+    obj = _lease()
+    if not obj:
+        return {}
+    raw = ((obj.get("metadata") or {}).get("annotations") or {}).get("lcd.dev/notes")
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_notes(data):
+    obj = _lease()
+    if obj is None:
+        return
+    meta = obj.setdefault("metadata", {})
+    ann = meta.setdefault("annotations", {})
+    ann["lcd.dev/notes"] = json.dumps(data)
+    _put(obj)
+
+
 def load():
     obj = _lease()
     if not obj:
