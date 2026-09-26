@@ -148,3 +148,28 @@ subjects:
   - kind: ServiceAccount
     name: lcd-collector
     namespace: lcd-monitor
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: lcd-collector-eater-db
+  namespace: eater
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["eater.eater-db.credentials.postgresql.acid.zalan.do"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lcd-collector-eater-db
+  namespace: eater
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: lcd-collector-eater-db
+subjects:
+  - kind: ServiceAccount
+    name: lcd-collector
+    namespace: lcd-monitor

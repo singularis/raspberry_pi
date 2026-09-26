@@ -121,12 +121,7 @@ def build(facts):
             big=_pct(rac.get("cpu"), "cpu"),
             l2="ram " + _pct(rac.get("ram_pct"), ""),
             l3=_temp(rac.get("temp")),
-            pages=[{"rows": [
-                ["cpu", _pct(rac.get("cpu"), "")],
-                ["ram", _pct(rac.get("ram_pct"), "")],
-                ["disk", _pct(rac.get("disk_pct"), "")],
-                ["temp", _temp(rac.get("temp"))],
-            ]}],
+            pages=_node_pages(rac, drives_first=True),
         ),
         tile(
             "worker", "WORKER",
@@ -136,6 +131,7 @@ def build(facts):
             l2="cpu " + _pct(wrk.get("cpu"), ""),
             l3=_temp(wrk.get("temp")),
             spark=wrk.get("spark") or [],
+            pages=_node_pages(wrk, ram_is_free=True),
         ),
         _gpu_tile(gpu),
         _pi_tile(pi),
@@ -144,9 +140,14 @@ def build(facts):
         tile(
             "network", "NETWORK",
             net_state(net.get("router", True), net.get("dns", True), net.get("loss"), net.get("ping_ms"), net.get("dns_ms"), net.get("rssi"), net.get("internet", True)),
-            big=_ms(net.get("ping_ms")),
+            big=_ms(net.get("google_ms")),
             l2="dns " + _ms(net.get("dns_ms")),
             l3="wifi " + (str(net.get("rssi")) + "dBm" if net.get("rssi") is not None else "--"),
+            pages=[{"rows": [
+                ["google", _ms(net.get("google_ms"))],
+                ["dns", _ms(net.get("dns_ms"))],
+                ["wifi", (str(net.get("rssi")) + "dBm") if net.get("rssi") is not None else "--"],
+            ]}],
         ),
         _camera_tile(cam),
     ]
@@ -179,12 +180,20 @@ def _gpu_tile(gpu):
 def _pi_tile(pi):
     sd = pi.get("sd_pct")
     st = pi_state(pi.get("temp"), pi.get("ram_free"), sd, pi.get("throttled_now"), pi.get("throttled_boot"))
+    power = "bad" if pi.get("throttled_now") or pi.get("throttled_boot") else "ok"
     return tile(
         "pi", "PI", st,
         _temp(pi.get("temp")),
         cap="cpu temp",
         l2="ram " + (str(pi.get("ram_free")) + "M" if pi.get("ram_free") is not None else "--"),
-        l3="power " + ("bad" if pi.get("throttled_now") or pi.get("throttled_boot") else "ok"),
+        l3="power " + power,
+        pages=[{"rows": [
+            ["temp", _temp(pi.get("temp"))],
+            ["ram", (str(pi.get("ram_free")) + "M") if pi.get("ram_free") is not None else "--"],
+            ["sd", _pct(pi.get("sd_pct"), "")],
+            ["power", power],
+            ["wifi", (str(pi.get("wifi")) + "dBm") if pi.get("wifi") is not None else "--"],
+        ]}],
     )
 
 
@@ -199,9 +208,9 @@ def _eater_tile(eat):
         l2="dishes today",
         l3=l3,
         pages=[{"rows": [
-            ["prod ms", str(eat.get("prod_ms") if eat.get("prod_ms") is not None else "--")],
-            ["dev", "ok" if eat.get("dev_ok", True) else "fail"],
-            ["hop", hop or "public"],
+            ["users", _n(eat.get("users_today"))],
+            ["scans", _n(eat.get("scans_today"))],
+            ["dishes", _n(eat.get("dishes"))],
         ]}],
     )
 
@@ -231,6 +240,39 @@ def _camera_tile(cam):
         screen="camera",
         camera={"recording": rec, "elapsed_s": cam.get("elapsed_s") or 0, "max_s": 1800, "phase": "recording" if rec else "idle"},
     )
+
+
+def _disk_rows(disks):
+    rows = []
+    for d in disks or []:
+        free = _gb(d.get("free_gb"))
+        rows.append([d.get("name") or "disk", _pct(d.get("pct"), "") + " " + free])
+    return rows
+
+
+def _node_pages(node, drives_first=False, ram_is_free=False):
+    ram = _gb(node.get("free_gb")) if ram_is_free or node.get("free_gb") is not None else _pct(node.get("ram_pct"), "")
+    stats = [
+        ["cpu", _pct(node.get("cpu"), "")],
+        ["ram", ram],
+        ["temp", _temp(node.get("temp"))],
+    ]
+    drives = _disk_rows(node.get("disks"))
+    pages = []
+    if drives_first and drives:
+        for i in range(0, len(drives), 6):
+            pages.append({"rows": drives[i:i + 6]})
+        pages.append({"rows": stats})
+        return pages
+    pages.append({"rows": stats + drives[:3]})
+    rest = drives[3:]
+    for i in range(0, len(rest), 6):
+        pages.append({"rows": rest[i:i + 6]})
+    return pages
+
+
+def _n(v):
+    return "--" if v is None else str(v)
 
 
 def _pct(v, suffix):

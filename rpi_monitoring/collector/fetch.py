@@ -54,7 +54,42 @@ def node_metrics(node):
     ram_pct = (100 * (1 - avail / total)) if avail and total else None
     disk_pct = (100 * (1 - disk_avail / disk_size)) if disk_avail and disk_size else None
     free_gb = (avail / (1024 ** 3)) if avail else None
-    return {"cpu": cpu, "ram_pct": ram_pct, "disk_pct": disk_pct, "temp": temp, "free_gb": free_gb, "ready": True}
+    return {"cpu": cpu, "ram_pct": ram_pct, "disk_pct": disk_pct, "temp": temp, "free_gb": free_gb, "ready": True, "disks": node_disks(node)}
+
+
+def node_disks(node):
+    """Real mounts only. Skip container and snap namespaces."""
+    sizes = prom(
+        f'node_filesystem_size_bytes{{kubernetes_node="{node}",fstype=~"btrfs|ext4|xfs|vfat"}}'
+    )
+    frees = prom(
+        f'node_filesystem_avail_bytes{{kubernetes_node="{node}",fstype=~"btrfs|ext4|xfs|vfat"}}'
+    )
+    free_by = {}
+    for row in frees:
+        mp = (row.get("metric") or {}).get("mountpoint")
+        try:
+            free_by[mp] = float(row["value"][1])
+        except (KeyError, TypeError, ValueError):
+            pass
+    out = []
+    for row in sizes:
+        metric = row.get("metric") or {}
+        mp = metric.get("mountpoint") or ""
+        if not mp or mp.startswith("/run") or "snapd" in mp or mp.startswith("/var/lib/kubelet"):
+            continue
+        try:
+            size = float(row["value"][1])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if size < 500 * 1024 * 1024 and mp != "/boot/efi":
+            continue
+        free = free_by.get(mp)
+        pct = (100 * (1 - free / size)) if free is not None and size else None
+        name = "root" if mp == "/" else mp.strip("/").replace("/", "-")
+        out.append({"name": name, "pct": pct, "free_gb": (free / (1024 ** 3)) if free else None})
+    out.sort(key=lambda d: -(d["free_gb"] or 0))
+    return out
 
 
 def k8s_ready():
@@ -235,7 +270,65 @@ def eater():
             out["dev_ok"] = ok2
             out["hop"] = (out["hop"] + " dev:" + code2).strip()
     out["argo_bad"] = argo_bad()
+    users, scans = eater_today()
+    out["users_today"] = users
+    out["scans_today"] = scans
     return out
+
+
+def eater_today():
+    """New registered users and dish scans for today. Read-only on the eater DB."""
+    token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    if not os.path.exists(token_path):
+        return None, None
+    try:
+        import base64
+        import psycopg2
+        token = open(token_path).read()
+        r = httpx.get(
+            "https://kubernetes.default.svc/api/v1/namespaces/eater/secrets/eater.eater-db.credentials.postgresql.acid.zalan.do",
+            headers={"Authorization": "Bearer " + token},
+            verify="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+            timeout=4,
+        )
+        r.raise_for_status()
+        data = r.json()["data"]
+        user = base64.b64decode(data["username"]).decode()
+        password = base64.b64decode(data["password"]).decode()
+        conn = psycopg2.connect(host="eater-db.eater.svc.cluster.local", dbname="eater", user=user, password=password, connect_timeout=4)
+        try:
+            cur = conn.cursor()
+            cur.execute("""SELECT COUNT(*) FROM public."user" WHERE register_date::date = CURRENT_DATE AND email <> 'test@test.com'""")
+            users = cur.fetchone()[0]
+            cur.execute("""SELECT COUNT(*) FROM dishes_day WHERE date = CURRENT_DATE AND user_email <> 'test@test.com'""")
+            scans = cur.fetchone()[0]
+            return int(users), int(scans)
+        finally:
+            conn.close()
+    except Exception:
+        return None, None
+
+
+def google_times():
+    """ICMP ping to google.com and how long a DNS lookup of that name takes."""
+    dns_ms = None
+    t0 = time.monotonic()
+    try:
+        socket.getaddrinfo("google.com", 443, type=socket.SOCK_STREAM)
+        dns_ms = int((time.monotonic() - t0) * 1000)
+    except Exception:
+        dns_ms = None
+    ping = None
+    try:
+        import re
+        import subprocess
+        r = subprocess.run(["ping", "-c", "1", "-W", "2", "google.com"], capture_output=True, text=True, timeout=4)
+        m = re.search(r"time[=<]([0-9.]+)", r.stdout or "")
+        if m:
+            ping = float(m.group(1))
+    except Exception:
+        ping = None
+    return ping, dns_ms
 
 
 def tcp_ms(host, port, timeout=1):
@@ -326,7 +419,8 @@ def assemble():
             age_d = None
     storage = dash.get("storage") or {}
     ping, router = tcp_ms("192.168.0.1", 80)
-    dns_ms, dns_ok = tcp_ms("192.168.0.91", 53)
+    _, dns_ok = tcp_ms("192.168.0.91", 53)
+    google_ms, dns_ms = google_times()
     _, internet = tcp_ms("1.1.1.1", 443)
     return {
         "nodes": {
@@ -350,6 +444,7 @@ def assemble():
             "sd_pct": sd_pct,
             "throttled_now": now_t,
             "throttled_boot": boot_t,
+            "wifi": pi.get("wifi_rssi"),
         },
         "eater": eater(),
         "backup": {
@@ -368,6 +463,7 @@ def assemble():
             "dns": dns_ok,
             "loss": 0 if router else 100,
             "ping_ms": ping,
+            "google_ms": google_ms,
             "dns_ms": dns_ms,
             "rssi": pi.get("wifi_rssi"),
             "internet": internet,

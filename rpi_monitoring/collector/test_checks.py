@@ -49,6 +49,30 @@ def test_claw_never_crit():
     assert gpu["state"] == "warn"
 
 
+def test_detail_pages():
+    tiles = build({
+        "nodes": {
+            "racoon": {"cpu": 12, "ram_pct": 37, "temp": 61, "disks": [
+                {"name": "root", "pct": 40, "free_gb": 200},
+                {"name": "other_hdd", "pct": 55, "free_gb": 800},
+            ]},
+            "worker": {"cpu": 20, "free_gb": 2.0, "temp": 41, "ready": True},
+        },
+        "pi": {"temp": 47, "ram_free": 241, "sd_pct": 40, "wifi": -20},
+        "eater": {"prod_ok": True, "dev_ok": True, "health_ok": True, "dishes": 2, "users_today": 0, "scans_today": 8},
+        "net": {"router": True, "dns": True, "internet": True, "google_ms": 18, "dns_ms": 4, "rssi": -20},
+    })
+    by = {t["id"]: t for t in tiles}
+    names = [r[0] for r in by["racoon"]["pages"][0]["rows"]]
+    assert set(names) == {"other_hdd", "root"}
+    assert by["worker"]["pages"]
+    assert by["pi"]["pages"][0]["rows"][0][0] == "temp"
+    assert by["eateria"]["pages"][0]["rows"][0] == ["users", "0"]
+    assert by["eateria"]["pages"][0]["rows"][1] == ["scans", "8"]
+    assert by["network"]["pages"][0]["rows"][0][0] == "google"
+    assert by["network"]["big"].endswith("ms")
+
+
 def test_protobuf_dish_count():
     assert dish_count(b"\x0a\x00\x0a\x00") == 2
 
