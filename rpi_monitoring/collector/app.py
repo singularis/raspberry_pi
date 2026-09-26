@@ -32,13 +32,28 @@ def refresh():
     with _lock:
         if built is not None:
             _cache["snap"] = built
+    if built is not None and leader():
+        try:
+            from lease import publish
+            publish(built)
+        except Exception as exc:
+            print("publish failed", type(exc).__name__)
+
+
+def _remember(body):
+    if body is None:
+        return
+    with _lock:
+        _cache["snap"] = body
 
 
 def _loop():
     while True:
         try:
-            from lease import hold
+            from lease import hold, load
             _cache["leader"] = hold()
+            if not _cache["leader"]:
+                _remember(load())
         except Exception:
             _cache["leader"] = True
         if _cache["leader"]:
@@ -54,15 +69,33 @@ def startup():
 
 @app.get("/ready")
 def ready():
-    if not leader():
-        return JSONResponse({"leader": False}, status_code=503)
-    return {"leader": True}
+    with _lock:
+        ok = _cache.get("snap") is not None
+    if not ok:
+        try:
+            from lease import load
+            _remember(load())
+        except Exception:
+            pass
+        with _lock:
+            ok = _cache.get("snap") is not None
+    if not ok:
+        return JSONResponse({"ready": False}, status_code=503)
+    return {"ready": True, "leader": leader()}
 
 
 @app.get("/api/display")
 def display():
     with _lock:
         body = _cache.get("snap")
+    if body is None:
+        try:
+            from lease import load
+            _remember(load())
+        except Exception:
+            pass
+        with _lock:
+            body = _cache.get("snap")
     if body is None and leader():
         refresh()
         with _lock:
