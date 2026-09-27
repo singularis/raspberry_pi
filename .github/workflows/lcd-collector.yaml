@@ -46,31 +46,11 @@ jobs:
           docker push "${IMAGE}:${TAG}"
           docker push "${IMAGE}:latest"
 
-      - name: Make the package public
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check the package is public
         run: |
           set -euo pipefail
-          ok=0
-          for path in \
-            /user/packages/container/lcd-collector \
-            /users/singularis/packages/container/lcd-collector
-          do
-            code=$(curl -sS -o /tmp/pkg-body -w "%{http_code}" -X PATCH \
-              -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com${path}" \
-              -d '{"visibility":"public"}')
-            echo "${path} -> ${code}"
-            cat /tmp/pkg-body
-            echo
-            case "$code" in
-              200|204) ok=1; break ;;
-            esac
-          done
-          test "$ok" = 1
-          # A public package issues an anonymous pull token. A private one does not.
+          # GitHub has no API to change container visibility (it 404s).
+          # A public package still issues an anonymous pull token, which is what the cluster uses.
           token=$(curl -fsS "https://ghcr.io/token?service=ghcr.io&scope=repository:singularis/lcd-collector:pull" | jq -er .token)
           curl -fsI -H "Authorization: Bearer ${token}" \
             -H "Accept: application/vnd.oci.image.index.v1+json" \
