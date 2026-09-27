@@ -64,11 +64,12 @@ def test_detail_pages():
     })
     by = {t["id"]: t for t in tiles}
     names = [r[0] for r in by["racoon"]["pages"][0]["rows"]]
-    assert set(names) == {"other_hdd", "root"}
+    assert names[0] == "cpu"
+    assert "other_hdd" in names and "root" in names
     assert by["worker"]["pages"]
-    assert by["pi"]["pages"][0]["rows"][0][0] == "temp"
-    assert by["eateria"]["pages"][0]["rows"][0] == ["users", "0"]
-    assert by["eateria"]["pages"][0]["rows"][1] == ["scans", "8"]
+    assert by["pi"]["pages"][0]["rows"][0][0] == "cpu"
+    assert by["eateria"]["pages"][0]["rows"][0][0] == "scans"
+    assert by["eateria"]["pages"][0]["rows"][1][0] == "users"
     assert by["network"]["pages"][0]["rows"][0][0] == "google"
     assert by["network"]["big"].endswith("ms")
 

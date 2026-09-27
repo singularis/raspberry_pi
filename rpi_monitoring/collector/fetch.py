@@ -270,9 +270,16 @@ def eater():
             out["dev_ok"] = ok2
             out["hop"] = (out["hop"] + " dev:" + code2).strip()
     out["argo_bad"] = argo_bad()
-    users, scans = eater_today()
+    users, scans, anon, anon_scans = eater_today()
     out["users_today"] = users
     out["scans_today"] = scans
+    out["anon_today"] = anon
+    out["anon_scans"] = anon_scans
+    try:
+        stats = httpx.get("http://192.168.0.113/api/stats", timeout=4).json().get("statistics") or {}
+        out["active_7d"] = stats.get("active_users_7_days")
+    except Exception:
+        out["active_7d"] = None
     return out
 
 
@@ -280,7 +287,7 @@ def eater_today():
     """New registered users and dish scans for today. Read-only on the eater DB."""
     token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
     if not os.path.exists(token_path):
-        return None, None
+        return None, None, None, None
     try:
         import base64
         import psycopg2
@@ -298,15 +305,19 @@ def eater_today():
         conn = psycopg2.connect(host="eater-db.eater.svc.cluster.local", dbname="eater", user=user, password=password, connect_timeout=4)
         try:
             cur = conn.cursor()
-            cur.execute("""SELECT COUNT(*) FROM public."user" WHERE register_date::date = CURRENT_DATE AND email <> 'test@test.com'""")
+            cur.execute("""SELECT COUNT(*) FROM public."user" WHERE register_date::date = CURRENT_DATE AND email <> 'test@test.com' AND email NOT LIKE 'anon_%@anonymous.local'""")
             users = cur.fetchone()[0]
+            cur.execute("""SELECT COUNT(*) FROM public."user" WHERE register_date::date = CURRENT_DATE AND email LIKE 'anon_%@anonymous.local'""")
+            anon = cur.fetchone()[0]
             cur.execute("""SELECT COUNT(*) FROM dishes_day WHERE date = CURRENT_DATE AND user_email <> 'test@test.com'""")
             scans = cur.fetchone()[0]
-            return int(users), int(scans)
+            cur.execute("""SELECT COUNT(*) FROM dishes_day WHERE date = CURRENT_DATE AND user_email LIKE 'anon_%@anonymous.local'""")
+            anon_scans = cur.fetchone()[0]
+            return int(users), int(scans), int(anon), int(anon_scans)
         finally:
             conn.close()
     except Exception:
-        return None, None
+        return None, None, None, None
 
 
 def google_times():
@@ -399,7 +410,6 @@ def assemble():
     else:
         notes["vllm_down_since"] = None
         vllm_late = False
-    _save_notes(notes)
     pi = pi_health()
     now_t, boot_t = throttled_flags(pi.get("throttled"))
     ram_free = pi.get("ram_free_mb")
@@ -422,6 +432,13 @@ def assemble():
     _, dns_ok = tcp_ms("192.168.0.91", 53)
     google_ms, dns_ms = google_times()
     _, internet = tcp_ms("1.1.1.1", 443)
+    staging = storage_body("staging")
+    archive = storage_body("archive")
+    hole = pihole()
+    down_b = nic_rate("receive")
+    up_b = nic_rate("transmit")
+    pi["cpu"] = pi_cpu(pi.get("cpu_total"), pi.get("cpu_idle"), notes)
+    _save_notes(notes)
     return {
         "nodes": {
             "racoon": rac,
@@ -433,7 +450,12 @@ def assemble():
             "vllm": vllm,
             "vllm_late": vllm_late,
             "temp": gpu_temp,
+            "cpu": gpu_m.get("cpu"),
+            "ram_pct": gpu_m.get("ram_pct"),
+            "free_gb": gpu_m.get("free_gb"),
+            "cpu_temp": gpu_m.get("temp"),
             "watts": gpu_watts,
+            "extra_disks": _extra_disks(rac),
             "claw_ok": claw_ok,
             "claw_lines": claw_lines,
             "off_since": None if on else "schedule",
@@ -445,6 +467,9 @@ def assemble():
             "throttled_now": now_t,
             "throttled_boot": boot_t,
             "wifi": pi.get("wifi_rssi"),
+            "cpu": pi.get("cpu"),
+            "ram_mb": pi.get("ram_mb"),
+            "sd_free_mb": pi.get("sd_free_mb"),
         },
         "eater": eater(),
         "backup": {
@@ -457,6 +482,11 @@ def assemble():
             "age_d": age_d,
             "next": _short(dash.get("tiers")),
             "archive": "ok" if storage.get("capacity_ok", True) else "low",
+            "staging_free_gb": _gib(staging.get("free_bytes")),
+            "staging_used_pct": staging.get("percent_used"),
+            "archive_free_gb": _gib(archive.get("free_bytes")),
+            "archive_used_pct": archive.get("percent_used"),
+            "archive_mounted": bool(archive.get("mounted")),
         },
         "net": {
             "router": router,
@@ -466,6 +496,10 @@ def assemble():
             "google_ms": google_ms,
             "dns_ms": dns_ms,
             "rssi": pi.get("wifi_rssi"),
+            "pihole": hole.get("up"),
+            "pihole_blocked": hole.get("blocked"),
+            "down": _rate(down_b),
+            "up": _rate(up_b),
             "internet": internet,
         },
         "camera": {
@@ -475,6 +509,78 @@ def assemble():
             "sd": (str(pi.get("sd_free_mb")) + "M") if pi.get("sd_free_mb") is not None else None,
         },
     }
+
+
+def _extra_disks(rac):
+    staging = storage_body("staging")
+    archive = storage_body("archive")
+    disks = [
+        {"name": "staging", "pct": staging.get("percent_used") if staging.get("mounted") else None, "free_gb": _gib(staging.get("free_bytes")) if staging.get("mounted") else None},
+        {"name": "archive", "pct": archive.get("percent_used") if archive.get("mounted") else None, "free_gb": _gib(archive.get("free_bytes")) if archive.get("mounted") else None},
+        {"name": "proxmox", "pct": None, "free_gb": None},
+    ]
+    for d in rac.get("disks") or []:
+        if d.get("name") == "root":
+            disks.append({"name": "racoon", "pct": d.get("pct"), "free_gb": d.get("free_gb")})
+    return disks
+
+
+def storage_body(kind):
+    try:
+        return httpx.get(BACKEPR + "/api/dashboard/storage/" + kind, timeout=8).json()
+    except Exception:
+        return {}
+
+
+def pihole():
+    try:
+        r = httpx.get("http://192.168.0.92/api/stats/summary", timeout=3)
+        if r.status_code != 200:
+            return {"up": False, "blocked": None}
+        q = (r.json().get("queries") or {})
+        return {"up": True, "blocked": q.get("percent_blocked")}
+    except Exception:
+        return {"up": False, "blocked": None}
+
+
+def nic_rate(direction):
+    rows = prom(f'rate(node_network_{direction}_bytes_total{{kubernetes_node="racoon",device="eth0"}}[2m])')
+    if not rows:
+        return None
+    try:
+        return float(rows[0]["value"][1])
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+
+
+def pi_cpu(total, idle, notes):
+    if total is None or idle is None:
+        return None
+    prev = notes.get("pi_cpu")
+    notes["pi_cpu"] = [total, idle]
+    if not prev or len(prev) != 2:
+        return None
+    dt = total - prev[0]
+    di = idle - prev[1]
+    if dt <= 0:
+        return None
+    return 100 * (1 - di / dt)
+
+
+def _gib(n):
+    if not n:
+        return None
+    return n / (1024 ** 3)
+
+
+def _rate(b):
+    if b is None:
+        return "--"
+    if b >= 1_000_000:
+        return f"{b/1_000_000:.1f}M"
+    if b >= 1000:
+        return f"{b/1000:.0f}k"
+    return f"{b:.0f}"
 
 
 def _short(tiers):

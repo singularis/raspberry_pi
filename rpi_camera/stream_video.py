@@ -393,6 +393,26 @@ def _disk():
     return total, free
 
 
+def _cpu_jiff(which):
+    text = _read("/proc/stat") or ""
+    for line in text.splitlines():
+        if not line.startswith("cpu "):
+            continue
+        parts = line.split()
+        nums = []
+        for p in parts[1:]:
+            try:
+                nums.append(int(p))
+            except ValueError:
+                return None
+        if len(nums) < 4:
+            return None
+        if which == "idle":
+            return nums[3]
+        return sum(nums)
+    return None
+
+
 def _rssi():
     text = _read("/proc/net/wireless") or ""
     for line in text.splitlines():
@@ -450,6 +470,8 @@ def health():
         "sd_free_mb": disk_free,
         "throttled": _read("/sys/devices/platform/soc/soc:firmware/get_throttled"),
         "wifi_rssi": _rssi(),
+        "cpu_total": _cpu_jiff("total"),
+        "cpu_idle": _cpu_jiff("idle"),
         "clips": clips_n,
         "clips_bytes": clips_b,
         "camera": _status(),
