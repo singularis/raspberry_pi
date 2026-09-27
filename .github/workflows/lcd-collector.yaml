@@ -15,11 +15,13 @@ concurrency:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   build:
     if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
-    # Chater's self-hosted runners are registered on that repo only.
+    # This repo has no Docker Hub secrets, and Chater's runners are not shared.
+    # GITHUB_TOKEN can push ghcr.io/singularis/lcd-collector.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,21 +29,31 @@ jobs:
       - name: Set image tag
         run: echo "TAG=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
 
-      - name: Log in to Docker Hub
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         run: |
-          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/lcd-collector"
+          IMAGE="ghcr.io/singularis/lcd-collector"
           docker build \
             -t "${IMAGE}:${TAG}" \
             -t "${IMAGE}:latest" \
             rpi_monitoring/collector
           docker push "${IMAGE}:${TAG}"
           docker push "${IMAGE}:latest"
+
+      - name: Make the package public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PUT \
+            -H "Accept: application/vnd.github+json" \
+            /user/packages/container/lcd-collector/visibility \
+            -f visibility=public
 
       - name: Pin the image tag for Argo
         run: |

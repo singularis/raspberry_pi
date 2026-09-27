@@ -1,4 +1,5 @@
 FROM python:3.12-slim
+LABEL org.opencontainers.image.source="https://github.com/singularis/raspberry_pi"
 WORKDIR /app
 COPY requirements.txt .
 RUN apt-get update \

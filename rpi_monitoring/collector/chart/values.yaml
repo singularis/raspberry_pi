@@ -1,7 +1,7 @@
 replicaCount: 2
 
 image:
-  repository: docker.io/singularis314/lcd-collector
+  repository: ghcr.io/singularis/lcd-collector
   pullPolicy: Always
   # GitHub Actions replaces this with the short commit sha on main.
   tag: "c9bfdde"
