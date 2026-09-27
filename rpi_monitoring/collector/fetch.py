@@ -435,8 +435,7 @@ def assemble():
     staging = storage_body("staging")
     archive = storage_body("archive")
     hole = pihole()
-    down_b = nic_rate("receive")
-    up_b = nic_rate("transmit")
+    down_mbps, up_mbps = speedtest(notes)
     pi["cpu"] = pi_cpu(pi.get("cpu_total"), pi.get("cpu_idle"), notes)
     _save_notes(notes)
     return {
@@ -498,8 +497,8 @@ def assemble():
             "rssi": pi.get("wifi_rssi"),
             "pihole": hole.get("up"),
             "pihole_blocked": hole.get("blocked"),
-            "down": _rate(down_b),
-            "up": _rate(up_b),
+            "down": _mbps(down_mbps),
+            "up": _mbps(up_mbps),
             "internet": internet,
         },
         "camera": {
@@ -543,14 +542,60 @@ def pihole():
         return {"up": False, "blocked": None}
 
 
-def nic_rate(direction):
-    rows = prom(f'rate(node_network_{direction}_bytes_total{{kubernetes_node="racoon",device="eth0"}}[2m])')
-    if not rows:
-        return None
+def speedtest(notes):
+    """Download and upload sample, like a speed test. Reused for 5 minutes."""
+    now = time.time()
+    last = notes.get("speed_at") or 0
     try:
-        return float(rows[0]["value"][1])
-    except (KeyError, TypeError, ValueError, IndexError):
+        fresh = now - float(last) < 300
+    except (TypeError, ValueError):
+        fresh = False
+    if fresh and notes.get("speed_down") is not None:
+        return notes.get("speed_down"), notes.get("speed_up")
+    down, up = _measure_down(), _measure_up()
+    if down is not None:
+        notes["speed_down"] = down
+    if up is not None:
+        notes["speed_up"] = up
+    if down is not None or up is not None:
+        notes["speed_at"] = now
+    return notes.get("speed_down"), notes.get("speed_up")
+
+
+def _measure_down():
+    n = 8_000_000
+    try:
+        t0 = time.monotonic()
+        r = httpx.get(f"https://speed.cloudflare.com/__down?bytes={n}", timeout=20)
+        r.raise_for_status()
+        dt = time.monotonic() - t0
+        if dt <= 0:
+            return None
+        return (len(r.content) * 8) / dt / 1_000_000
+    except Exception:
         return None
+
+
+def _measure_up():
+    payload = b"0" * 2_000_000
+    try:
+        t0 = time.monotonic()
+        r = httpx.post("https://speed.cloudflare.com/__up", content=payload, timeout=20)
+        r.raise_for_status()
+        dt = time.monotonic() - t0
+        if dt <= 0:
+            return None
+        return (len(payload) * 8) / dt / 1_000_000
+    except Exception:
+        return None
+
+
+def _mbps(v):
+    if v is None:
+        return "--"
+    if v >= 10:
+        return f"{v:.0f} Mb/s"
+    return f"{v:.1f} Mb/s"
 
 
 def pi_cpu(total, idle, notes):
@@ -571,16 +616,6 @@ def _gib(n):
     if not n:
         return None
     return n / (1024 ** 3)
-
-
-def _rate(b):
-    if b is None:
-        return "--"
-    if b >= 1_000_000:
-        return f"{b/1_000_000:.1f} MB/s"
-    if b >= 1000:
-        return f"{b/1000:.0f} kB/s"
-    return f"{b:.0f} B/s"
 
 
 def _short(tiers):
