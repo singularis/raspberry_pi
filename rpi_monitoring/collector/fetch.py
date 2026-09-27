@@ -2,6 +2,7 @@
 
 import os
 import socket
+import threading
 import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -542,31 +543,65 @@ def pihole():
         return {"up": False, "blocked": None}
 
 
+_speed_mu = threading.Lock()
+_speed = {"down": None, "up": None, "at": 0.0, "loaded": False, "running": False}
+
+
 def speedtest(notes):
-    """Download and upload sample, like a speed test. Reused for 5 minutes."""
-    now = time.time()
-    last = notes.get("speed_at") or 0
-    try:
-        fresh = now - float(last) < 300
-    except (TypeError, ValueError):
-        fresh = False
-    if fresh and notes.get("speed_down") is not None:
-        return notes.get("speed_down"), notes.get("speed_up")
-    down, up = _measure_down(), _measure_up()
+    """Return the last speed-test result. A new test runs in the background every 5 minutes."""
+    _speed_load(notes)
+    _speed_kick()
+    with _speed_mu:
+        down, up, at = _speed["down"], _speed["up"], _speed["at"]
     if down is not None:
         notes["speed_down"] = down
-    if up is not None:
         notes["speed_up"] = up
-    if down is not None or up is not None:
-        notes["speed_at"] = now
-    return notes.get("speed_down"), notes.get("speed_up")
+        notes["speed_at"] = at
+    return down, up
+
+
+def _speed_load(notes):
+    with _speed_mu:
+        if _speed["loaded"]:
+            return
+        _speed["loaded"] = True
+        if notes.get("speed_down") is None:
+            return
+        _speed["down"] = notes.get("speed_down")
+        _speed["up"] = notes.get("speed_up")
+        try:
+            _speed["at"] = float(notes.get("speed_at") or 0)
+        except (TypeError, ValueError):
+            _speed["at"] = 0.0
+
+
+def _speed_kick():
+    with _speed_mu:
+        if _speed["running"]:
+            return
+        if _speed["down"] is not None and time.time() - _speed["at"] < 300:
+            return
+        _speed["running"] = True
+    threading.Thread(target=_speed_worker, daemon=True).start()
+
+
+def _speed_worker():
+    down, up = _measure_down(), _measure_up()
+    with _speed_mu:
+        if down is not None:
+            _speed["down"] = down
+        if up is not None:
+            _speed["up"] = up
+        if down is not None or up is not None:
+            _speed["at"] = time.time()
+        _speed["running"] = False
 
 
 def _measure_down():
-    n = 8_000_000
+    n = 4_000_000
     try:
         t0 = time.monotonic()
-        r = httpx.get(f"https://speed.cloudflare.com/__down?bytes={n}", timeout=20)
+        r = httpx.get(f"https://speed.cloudflare.com/__down?bytes={n}", timeout=12)
         r.raise_for_status()
         dt = time.monotonic() - t0
         if dt <= 0:
@@ -577,10 +612,10 @@ def _measure_down():
 
 
 def _measure_up():
-    payload = b"0" * 2_000_000
+    payload = b"0" * 1_000_000
     try:
         t0 = time.monotonic()
-        r = httpx.post("https://speed.cloudflare.com/__up", content=payload, timeout=20)
+        r = httpx.post("https://speed.cloudflare.com/__up", content=payload, timeout=12)
         r.raise_for_status()
         dt = time.monotonic() - t0
         if dt <= 0:
