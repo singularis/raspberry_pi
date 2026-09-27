@@ -1,0 +1,310 @@
+{
+  "schema": 1,
+  "ts": "2026-09-26T15:43:00+01:00",
+  "next_in_s": 58,
+  "summary": {
+    "warn": 1,
+    "crit": 0,
+    "worst": "gpu"
+  },
+  "tiles": [
+    {
+      "id": "racoon",
+      "label": "RACOON",
+      "state": "ok",
+      "age_s": 4,
+      "big": "37%",
+      "cap": "cpu",
+      "l2": "ram 41%",
+      "l3": "56C 35W",
+      "spark": [
+        30,
+        33,
+        37,
+        36,
+        37
+      ],
+      "pages": [
+        {
+          "chart": {
+            "label": "cpu",
+            "points": [
+              30,
+              33,
+              37
+            ]
+          },
+          "rows": [
+            [
+              "cpu",
+              "37%"
+            ],
+            [
+              "ram",
+              "41%"
+            ]
+          ]
+        },
+        {
+          "rows": [
+            [
+              "nodes",
+              "2/3"
+            ],
+            [
+              "pods",
+              "ok"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "worker",
+      "label": "WORKER",
+      "state": "ok",
+      "age_s": 4,
+      "big": "1.8G",
+      "cap": "ram free",
+      "l2": "cpu 23%",
+      "l3": "52C 9W",
+      "spark": [
+        2,
+        1.9,
+        1.8,
+        1.8
+      ],
+      "pages": [
+        {
+          "chart": {
+            "label": "ram free",
+            "points": [
+              2,
+              1.8,
+              1.6
+            ],
+            "line": 1
+          },
+          "rows": [
+            [
+              "ram free",
+              "1.8G"
+            ],
+            [
+              "cpu",
+              "23%"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpu",
+      "label": "GPU",
+      "state": "warn",
+      "age_s": 4,
+      "big": "41%",
+      "cap": "gpu",
+      "l2": "claw: channel",
+      "l3": "",
+      "pages": [
+        {
+          "rows": [
+            [
+              "state",
+              "off (scheduled)"
+            ],
+            [
+              "on",
+              "08:00"
+            ]
+          ],
+          "actions": [
+            {
+              "id": "gpu_wake",
+              "label": "Wake GPU",
+              "enabled": true,
+              "confirm": {
+                "title": "Wake GPU host?",
+                "body": "Boots Proxmox and racoon-gpu",
+                "verb": "Wake"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pi",
+      "label": "PI",
+      "state": "ok",
+      "age_s": 4,
+      "big": "48C",
+      "cap": "cpu temp",
+      "l2": "ram 174M",
+      "l3": "power ok",
+      "spark": [
+        160,
+        170,
+        174
+      ],
+      "pages": [
+        {
+          "rows": [
+            [
+              "state",
+              "ok"
+            ],
+            [
+              "value",
+              "48C"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "eateria",
+      "label": "EATERIA",
+      "state": "ok",
+      "age_s": 4,
+      "big": "+23",
+      "cap": "dishes today",
+      "l2": "7d users 57",
+      "l3": "prod+dev ok",
+      "spark": [
+        200,
+        300,
+        420
+      ],
+      "pages": [
+        {
+          "rows": [
+            [
+              "synth prod",
+              "420ms"
+            ],
+            [
+              "synth dev",
+              "ok"
+            ]
+          ]
+        },
+        {
+          "rows": [
+            [
+              "dishes",
+              "+23"
+            ],
+            [
+              "users 7d",
+              "57"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "backup",
+      "label": "BACKUP",
+      "state": "ok",
+      "age_s": 4,
+      "big": "4d",
+      "cap": "last ok",
+      "l2": "next in 3d",
+      "l3": "archive 61%",
+      "pages": [
+        {
+          "rows": [
+            [
+              "last",
+              "ok"
+            ],
+            [
+              "next",
+              "3d"
+            ]
+          ],
+          "actions": [
+            {
+              "id": "backup_run",
+              "label": "Run backup",
+              "enabled": true,
+              "confirm": {
+                "title": "Run full backup?",
+                "body": "Wakes GPU, powers 12 TB, rsync + restic",
+                "verb": "Run"
+              }
+            }
+          ]
+        },
+        {
+          "bars": [
+            {
+              "label": "staging",
+              "pct": 40
+            },
+            {
+              "label": "archive",
+              "pct": 61
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "network",
+      "label": "NETWORK",
+      "state": "ok",
+      "age_s": 4,
+      "big": "12ms",
+      "cap": "wan",
+      "l2": "dns 8ms",
+      "l3": "wifi -58dBm",
+      "spark": [
+        11,
+        12,
+        14,
+        12
+      ],
+      "pages": [
+        {
+          "rows": [
+            [
+              "state",
+              "ok"
+            ],
+            [
+              "value",
+              "12ms"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "camera",
+      "label": "CAMERA",
+      "state": "idle",
+      "age_s": 0,
+      "big": "REC",
+      "cap": "ready",
+      "l2": "SD 8.0G",
+      "l3": "~5h left",
+      "screen": "camera",
+      "camera": {
+        "recording": false,
+        "elapsed_s": 0,
+        "max_s": 1800,
+        "sd_free": "8.0G",
+        "hours_left": 5,
+        "viewers": 0,
+        "last_clip": "",
+        "clip_count": 0,
+        "note": "live view pauses while recording",
+        "error": "",
+        "phase": "idle"
+      }
+    }
+  ]
+}

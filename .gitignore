@@ -1,5 +1,6 @@
 recordings/
 rpi_camera/recordings/
+rpi_monitoring/display/lcd-monitor
 __pycache__/
 *.pyc
 *.pyo

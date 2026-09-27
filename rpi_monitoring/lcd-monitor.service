@@ -1,0 +1,15 @@
+[Unit]
+Description=LCD monitoring UI
+After=network-online.target flask_camera.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/home/dante/raspberry_pi/rpi_monitoring/display/lcd-monitor -url http://192.168.0.124:8000/api/display -refresh 5s
+WorkingDirectory=/home/dante/raspberry_pi/rpi_monitoring/display
+Restart=always
+RestartSec=2
+User=dante
+SupplementaryGroups=spi gpio
+
+[Install]
+WantedBy=multi-user.target
