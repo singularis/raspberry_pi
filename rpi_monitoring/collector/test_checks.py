@@ -70,7 +70,8 @@ def test_detail_pages():
     assert by["pi"]["pages"][0]["rows"][0][0] == "cpu"
     assert by["eateria"]["pages"][0]["rows"][0][0] == "scans"
     assert by["eateria"]["pages"][0]["rows"][1][0] == "users"
-    assert by["network"]["pages"][0]["rows"][0][0] == "google"
+    assert by["network"]["pages"][0]["rows"][0][0] == "ping"
+    assert by["network"]["pages"][0]["rows"][2][0] == "pihole"
     assert by["network"]["big"].endswith("ms")
 
 

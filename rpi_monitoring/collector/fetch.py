@@ -577,10 +577,10 @@ def _rate(b):
     if b is None:
         return "--"
     if b >= 1_000_000:
-        return f"{b/1_000_000:.1f}M"
+        return f"{b/1_000_000:.1f} MB/s"
     if b >= 1000:
-        return f"{b/1000:.0f}k"
-    return f"{b:.0f}"
+        return f"{b/1000:.0f} kB/s"
+    return f"{b:.0f} B/s"
 
 
 def _short(tiers):
