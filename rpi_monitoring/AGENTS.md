@@ -61,7 +61,8 @@ Namespace `lcd-monitor`, LoadBalancer `192.168.0.124:8000` (pod listens on 8010,
 `setting/camera.json` + `rpi_camera/stream_video.py`.
 
 - IMX519, `dtoverlay=imx519`, `gpu_mem=128`
-- Live 1280×960, raw 2328×1748, YUV420, 2 buffers, hflip+vflip
+- Live 1280×960, raw 2328×1748, YUV420, 2 buffers, hflip+vflip (180°, ISP). Page CSS is rotate(-90deg) and shows the full frame, no crop. The ISP drops a 90° transpose. Do not JPEG-rotate (about 250 ms a frame)
+- JPEG bitrate is the hardware cap, 25 Mbit/s. Sharpness 2.0 and high-quality denoise are ISP controls
 - Rec: **same session**, swap encoder only. Never 1080p/4K reopen (OOM on ~364 MB)
 - RecFile must be `io.BufferedIOBase`. Do not use `cam.encoder`
 - MJPEG must be the hardware encoder (`/dev/video11`). The script waits for the device before importing Picamera2 and exits if Picamera2 picked the software one. `_close` stops the encoder before `close()`

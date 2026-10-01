@@ -38,7 +38,7 @@ if not _wait_encoder():
 from flask import Flask, Response, jsonify, request, send_from_directory
 from libcamera import Transform
 from picamera2 import Picamera2
-from picamera2.encoders import MJPEGEncoder, Quality, _hw_encoder_available
+from picamera2.encoders import MJPEGEncoder, _hw_encoder_available
 from picamera2.outputs import FileOutput
 
 if not _hw_encoder_available:
@@ -50,6 +50,8 @@ CLIPS = os.path.join(HERE, "recordings")
 RAW = (2328, 1748)          # IMX519 2×2 bin, full FOV
 LIVE = (1280, 960)
 FLIP = Transform(hflip=True, vflip=True)
+# /dev/video11 video_bitrate max. Quality.HIGH already asked for ~24 Mbit/s.
+ENC_RATE = 25_000_000
 HDR = {"Cache-Control": "no-cache, no-store"}
 BOUND = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
 
@@ -153,10 +155,9 @@ def _setup(cam, main, raw, record):
         "FrameDurationLimits": (lo, hi),
         "AeEnable": True,
         "AwbEnable": True,
-        "Sharpness": 1.0,
-        "NoiseReductionMode": 0,
+        "Sharpness": 2.0,
+        "NoiseReductionMode": 2,
     })
-    return Quality.HIGH
 
 
 def _status():
@@ -206,7 +207,7 @@ def cam_start(mode):
         if cam is None:
             cam = Picamera2()
             try:
-                q = _setup(cam, LIVE, RAW, mode == "record")
+                _setup(cam, LIVE, RAW, mode == "record")
                 cam.start()
             except Exception:
                 _close(cam)
@@ -216,10 +217,9 @@ def cam_start(mode):
         else:
             lo, hi = (150000, 250000) if mode == "record" else (55000, 125000)
             cam.set_controls({"FrameDurationLimits": (lo, hi)})
-            q = Quality.HIGH
         cam.stop_encoder()
         dest = _rec_f if mode == "record" else _buf
-        cam.start_encoder(MJPEGEncoder(), FileOutput(dest), quality=q)
+        cam.start_encoder(MJPEGEncoder(bitrate=ENC_RATE), FileOutput(dest), quality=None)
         _rec_size = LIVE if mode == "record" else None
         print("[cam]", mode, LIVE[0], "x", LIVE[1])
 
