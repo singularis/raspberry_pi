@@ -439,9 +439,14 @@ func (a *App) confirmTap(id string) {
 		if a.Action != nil {
 			id = a.Action.ID
 		}
-		a.toast("Sending...")
 		a.Action = nil
-		a.Screen = scrDetail
+		if id == "wake" {
+			a.goHome()
+			a.toast("magic packet sent")
+		} else {
+			a.toast("Sending...")
+			a.Screen = scrDetail
+		}
 		if id != "" && a.Post != nil {
 			go a.Post(id)
 		}

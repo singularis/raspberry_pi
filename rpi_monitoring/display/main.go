@@ -67,6 +67,9 @@ func runDevice(url string, refresh time.Duration) {
 	a.ActionURL = actionURL(url)
 	a.Post = func(id string) {
 		msg := postAction(a.ActionURL, id)
+		if id == "wake" && msg == "sent" {
+			return
+		}
 		select {
 		case a.Notes <- msg:
 		default:

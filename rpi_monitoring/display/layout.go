@@ -65,6 +65,14 @@ func actionButtons(n int) []image.Rectangle {
 
 const headerH = 34
 
+// Eateria today / yesterday columns. The gaps are the empty space between them.
+const (
+	dualLabelX1 = 112
+	dualNowX0   = 148
+	dualNowX1   = 196
+	dualPrevX0  = 236
+)
+
 func backRect() image.Rectangle  { return image.Rect(2, 2, 40, headerH) }
 func titleRect() image.Rectangle { return image.Rect(44, 2, W-48, headerH) }
 func pageRect() image.Rectangle  { return image.Rect(W-42, 2, W-4, headerH) }

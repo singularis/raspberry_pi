@@ -114,17 +114,21 @@ func (a *App) recording() bool {
 
 func (a *App) paintHome(ink color.Color) {
 	fill(a.Img, image.Rect(0, 0, W, statusH), color.RGBA{0, 0, 0, 255})
-	a.put(a.F.sans14, a.Now.Format("15:04"), clockRect(), ink, false)
-	sum, sumCol := a.statusLine()
 	if a.Toast != "" {
-		sum = a.Toast
-		sumCol = ink
+		r := image.Rect(4, 0, W-4, statusH)
+		if a.recording() {
+			r.Max.X = recRect().Min.X - 4
+		}
+		a.put(a.F.sans14, a.Toast, r, ink, true)
+	} else {
+		a.put(a.F.sans14, a.Now.Format("15:04"), clockRect(), ink, false)
+		sum, sumCol := a.statusLine()
+		a.put(a.F.sans14, sum, statusSummaryRect(), sumCol, true)
 	}
-	a.put(a.F.sans14, sum, statusSummaryRect(), sumCol, true)
 	if a.recording() {
 		a.put(a.F.sans14, "REC", recRect(), color.RGBA{255, 80, 80, 255}, true)
 	}
-	if a.Snap != nil && a.Snap.TempOut != "" {
+	if a.Toast == "" && a.Snap != nil && a.Snap.TempOut != "" {
 		tc := ink
 		if a.nightLook() {
 			tc = nightInk()
@@ -296,8 +300,8 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 	y := headerH + 2
 	if dual {
 		hh := faceH(a.F.sans11)
-		a.put(a.F.sans11, "now", image.Rect(100, y, 156, y+hh), white, false)
-		a.put(a.F.sans11, "prev", image.Rect(160, y, right, y+hh), white, false)
+		a.put(a.F.sans11, "now", image.Rect(dualNowX0, y, dualNowX1, y+hh), white, false)
+		a.put(a.F.sans11, "prev", image.Rect(dualPrevX0, y, right, y+hh), white, false)
 		y += hh + 1
 	}
 	n := 0
@@ -332,10 +336,10 @@ func (a *App) paintMetricRow(face font.Face, row Row, y, pitch, right int, dual 
 		a.put(face, row.Value, image.Rect(122, y, x1, y+pitch), metricInk(row.State), false)
 		return
 	}
-	a.put(face, row.Label, image.Rect(8, y, 96, y+pitch), white, false)
-	a.put(face, row.Value, image.Rect(100, y, 156, y+pitch), metricInk(row.State), false)
-	if row.Value2 != "" && 160 < x1 {
-		a.put(face, row.Value2, image.Rect(160, y, x1, y+pitch), metricInk(row.State2), false)
+	a.put(face, row.Label, image.Rect(8, y, dualLabelX1, y+pitch), white, false)
+	a.put(face, row.Value, image.Rect(dualNowX0, y, dualNowX1, y+pitch), metricInk(row.State), false)
+	if row.Value2 != "" && dualPrevX0 < x1 {
+		a.put(face, row.Value2, image.Rect(dualPrevX0, y, x1, y+pitch), metricInk(row.State2), false)
 	}
 }
 

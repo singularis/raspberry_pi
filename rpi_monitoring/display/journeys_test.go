@@ -117,13 +117,14 @@ func TestJourneys(t *testing.T) {
 	save("J7_confirm", a)
 	a.advance(time.Second)
 	tap(a, "ok")
-	if a.Toast == "" {
-		t.Fatal("J7 no toast")
+	if a.Screen != scrHome || a.Toast != "magic packet sent" {
+		t.Fatalf("J7 home %s toast %q", a.Screen, a.Toast)
 	}
 	save("J7_toast", a)
 
 	// J8 cancel
 	a.Toast = ""
+	tap(a, "tile:5")
 	tap(a, "act:wake")
 	tap(a, "cancel")
 	if a.Screen != scrDetail {
