@@ -125,7 +125,7 @@ def build(facts):
         tile(
             "worker", "WORKER",
             node_state(wrk.get("ready", True), wrk.get("cpu"), None, wrk.get("disk_pct"), wrk.get("temp"), wrk.get("free_gb"), wrk.get("pressure"), wrk.get("majfault")),
-            big=_gb(wrk.get("free_gb")),
+            big=_amt(wrk.get("free_gb")),
             cap="ram free",
             l2="cpu " + _pct(wrk.get("cpu"), ""),
             l3=_temp(wrk.get("temp")),
@@ -165,17 +165,7 @@ def _gpu_tile(gpu):
     watt_s = "" if watts is None else " " + str(int(round(watts))) + "W"
     if not on:
         big, l2 = "OFF", "since " + (gpu.get("off_since") or "--")
-        rows = [
-            _row("cpu", "off", "off"),
-            _row("ram free", "off", "off"),
-            _row("gpu", "off", "off"),
-            _row("gpu ram", "off", "off"),
-            _row("staging free", "off", "off"),
-            _row("/ free", "off", "off"),
-            _row("temp", "off", "off"),
-            _row("gpu temp", "off", "off"),
-            _row("k8s", "off", "off"),
-        ]
+        rows = _off("cpu", "ram free", "gpu", "gpu ram", "staging free", "/ free", "temp", "gpu temp", "k8s")
         pages = [{"rows": rows}]
     else:
         big, l2 = _temp(gpu.get("temp")), "vllm " + ("up" if gpu.get("vllm") else "down") + watt_s
@@ -247,7 +237,7 @@ def _backup_tile(bak):
     stag = bak.get("staging_free_gb")
     arch = bak.get("archive_free_gb")
     arch_on = bak.get("archive_mounted")
-    big = "RUN" if bak.get("running") else (_tb(stag) if stag is not None else _ago(bak.get("age_d")))
+    big = "RUN" if bak.get("running") else (_amt(stag) if stag is not None else _ago(bak.get("age_d")))
     gpu_on = bool(bak.get("gpu_on"))
     actions = [
         {
@@ -265,7 +255,7 @@ def _backup_tile(bak):
             "confirm": {"title": "Run backup now?", "body": "Starts the staging sync", "verb": "Run"},
         },
     ]
-    cap = "arc off" if arch_on is False else ("arc " + _tb(arch))
+    cap = "arc off" if arch_on is False else ("arc " + _amt(arch))
     if bak.get("running"):
         cap = "running"
     if gpu_on and bak.get("staging_mounted"):
@@ -316,6 +306,10 @@ def _lvl_low(v, warn, crit):
 
 def _row(label, value, state="ok"):
     return [label, value, state]
+
+
+def _off(*labels):
+    return [_row(label, "off", "off") for label in labels]
 
 
 def _cpu_row(pct):
@@ -461,22 +455,10 @@ def _amt(gb):
     return f"{gb:.1f}G"
 
 
-def _gb(v):
-    return _amt(v)
-
-
 def _ms(v):
     if v is None:
         return "--"
     return str(int(round(v))) + "ms"
-
-
-def _tb(gb):
-    if gb is None:
-        return "--"
-    if gb >= 1024:
-        return f"{gb/1024:.1f}T"
-    return f"{gb:.0f}G"
 
 
 def _ago(days):

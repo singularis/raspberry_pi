@@ -507,7 +507,7 @@ func (a *App) hit(x, y int) string {
 				if i >= len(btns) {
 					break
 				}
-				if p.In(btns[i]) {
+				if p.In(actionHitRect(btns[i])) {
 					return "act:" + act.ID
 				}
 			}

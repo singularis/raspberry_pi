@@ -108,24 +108,21 @@ func TestJourneys(t *testing.T) {
 		t.Fatalf("J5 %s", a.Screen)
 	}
 
-	// J7 wake confirm, on the backup screen
+	// J7 one tap on Wake sends and writes the message on the home screen
 	tap(a, "tile:5")
 	tap(a, "act:wake")
-	if a.Screen != scrConfirm {
-		t.Fatalf("J7 confirm %s", a.Screen)
-	}
-	save("J7_confirm", a)
-	a.advance(time.Second)
-	tap(a, "ok")
 	if a.Screen != scrHome || a.Toast != "magic packet sent" {
 		t.Fatalf("J7 home %s toast %q", a.Screen, a.Toast)
 	}
 	save("J7_toast", a)
 
-	// J8 cancel
+	// J8 cancel backup confirm
 	a.Toast = ""
 	tap(a, "tile:5")
-	tap(a, "act:wake")
+	tap(a, "act:backup")
+	if a.Screen != scrConfirm {
+		t.Fatalf("J8 confirm %s", a.Screen)
+	}
 	tap(a, "cancel")
 	if a.Screen != scrDetail {
 		t.Fatalf("J8 %s", a.Screen)
@@ -243,7 +240,7 @@ func TestJourneys(t *testing.T) {
 	// J4 confirm idle
 	a = boot(t, day, snap)
 	tap(a, "tile:5")
-	tap(a, "act:wake")
+	tap(a, "act:backup")
 	a.advance(6 * time.Second)
 	if a.Screen != scrHome {
 		t.Fatalf("confirm idle %s", a.Screen)
@@ -270,7 +267,7 @@ func TestTextBoxes(t *testing.T) {
 	}{
 		{"home", boot(t, day, snap)},
 		{"detail", func() *App { a := boot(t, day, snap); tap(a, "tile:0"); return a }()},
-		{"confirm", func() *App { a := boot(t, day, snap); tap(a, "tile:5"); tap(a, "act:wake"); return a }()},
+		{"confirm", func() *App { a := boot(t, day, snap); tap(a, "tile:5"); tap(a, "act:backup"); return a }()},
 		{"backup", func() *App { a := boot(t, day, snap); tap(a, "tile:5"); return a }()},
 		{"gpu", func() *App { a := boot(t, day, snap); tap(a, "tile:2"); return a }()},
 		{"eateria", func() *App { a := boot(t, day, snap); tap(a, "tile:4"); return a }()},

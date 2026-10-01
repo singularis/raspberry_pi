@@ -285,6 +285,9 @@ func (a *App) pointerUp(x, y int) {
 	if a.Target == "lock" && rectDist(lockHit(), x, y) <= 36 {
 		id = "lock"
 	}
+	if len(a.Target) > 4 && a.Target[:4] == "act:" && id != a.Target && a.nearAction(a.Target, x, y) {
+		id = a.Target
+	}
 	same := a.Down && id != "" && id == a.Target
 	a.Down = false
 	a.Target = ""
@@ -415,6 +418,10 @@ func (a *App) startAction(id string) {
 			a.toast(act.Why)
 			return
 		}
+		if act.ID == "wake" {
+			a.sendWake()
+			return
+		}
 		if act.Confirm != nil {
 			cp := *act
 			a.Action = &cp
@@ -424,6 +431,36 @@ func (a *App) startAction(id string) {
 		}
 		a.toast("Sending...")
 	}
+}
+
+func (a *App) sendWake() {
+	// After 23:00 goHome() is the night clock, and that screen draws no message.
+	a.WakeUntil = a.Mono + 8*time.Second
+	a.ThemeNight = false
+	a.Screen = scrHome
+	a.Action = nil
+	a.IdleAt = a.Mono
+	a.toast("magic packet sent")
+	a.ToastUntil = a.Mono + 5*time.Second
+	if a.Post != nil {
+		go a.Post("wake")
+	}
+}
+
+func (a *App) nearAction(id string, x, y int) bool {
+	t := a.cur()
+	if t == nil || a.Page >= len(t.Pages) {
+		return false
+	}
+	acts := t.Pages[a.Page].Actions
+	btns := actionButtons(len(acts))
+	for i, act := range acts {
+		if i >= len(btns) || act.ID != id[4:] {
+			continue
+		}
+		return rectDist(actionHitRect(btns[i]), x, y) <= 40
+	}
+	return false
 }
 
 func (a *App) confirmTap(id string) {
@@ -439,14 +476,9 @@ func (a *App) confirmTap(id string) {
 		if a.Action != nil {
 			id = a.Action.ID
 		}
+		a.toast("Sending...")
 		a.Action = nil
-		if id == "wake" {
-			a.goHome()
-			a.toast("magic packet sent")
-		} else {
-			a.toast("Sending...")
-			a.Screen = scrDetail
-		}
+		a.Screen = scrDetail
 		if id != "" && a.Post != nil {
 			go a.Post(id)
 		}

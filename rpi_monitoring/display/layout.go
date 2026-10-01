@@ -63,6 +63,19 @@ func actionButtons(n int) []image.Rectangle {
 	return out
 }
 
+// actionHitRect is wider than the drawn button so a tap on the right edge still counts.
+func actionHitRect(r image.Rectangle) image.Rectangle {
+	x := r.Min.X - 36
+	if x < 0 {
+		x = 0
+	}
+	y0 := r.Min.Y - 12
+	if y0 < headerH {
+		y0 = headerH
+	}
+	return image.Rect(x, y0, W, r.Max.Y+12)
+}
+
 const headerH = 34
 
 // Eateria today / yesterday columns. The gaps are the empty space between them.
