@@ -38,6 +38,9 @@ func tap(a *App, id string) {
 
 func TestJourneys(t *testing.T) {
 	dir := filepath.Join(os.TempDir(), "lcd_journeys")
+	if v := os.Getenv("LCD_PREVIEW"); v != "" {
+		dir = v
+	}
 	_ = os.MkdirAll(dir, 0o755)
 	day := time.Date(2026, 9, 26, 15, 43, 0, 0, time.UTC)
 	night := time.Date(2026, 9, 26, 23, 10, 0, 0, time.UTC)
@@ -105,9 +108,9 @@ func TestJourneys(t *testing.T) {
 		t.Fatalf("J5 %s", a.Screen)
 	}
 
-	// J7 wake confirm
-	tap(a, "tile:2")
-	tap(a, "act:gpu_wake")
+	// J7 wake confirm, on the backup screen
+	tap(a, "tile:5")
+	tap(a, "act:wake")
 	if a.Screen != scrConfirm {
 		t.Fatalf("J7 confirm %s", a.Screen)
 	}
@@ -121,16 +124,16 @@ func TestJourneys(t *testing.T) {
 
 	// J8 cancel
 	a.Toast = ""
-	tap(a, "act:gpu_wake")
+	tap(a, "act:wake")
 	tap(a, "cancel")
 	if a.Screen != scrDetail {
 		t.Fatalf("J8 %s", a.Screen)
 	}
 
 	// J10 disabled
-	a.Snap.Tiles[2].Pages[0].Actions[0].Enabled = false
-	a.Snap.Tiles[2].Pages[0].Actions[0].Why = "GPU is on"
-	tap(a, "act:gpu_wake")
+	a.Snap.Tiles[5].Pages[0].Actions[0].Enabled = false
+	a.Snap.Tiles[5].Pages[0].Actions[0].Why = "GPU is on"
+	tap(a, "act:wake")
 	if a.Screen == scrConfirm {
 		t.Fatal("J10 should not confirm")
 	}
@@ -141,7 +144,7 @@ func TestJourneys(t *testing.T) {
 
 	// J12 backup confirm
 	tap(a, "tile:5")
-	tap(a, "act:backup_run")
+	tap(a, "act:backup")
 	if a.Screen != scrConfirm {
 		t.Fatalf("J12 %s", a.Screen)
 	}
@@ -173,13 +176,10 @@ func TestJourneys(t *testing.T) {
 	}
 	save("J18_worker", a)
 
-	// J21 two misses after grace -> bang
+	// J21 no good fetch for 5 minutes -> bang
 	a = boot(t, day, snap)
-	a.Started = 0
-	a.Mono = bootGrace + time.Second
-	for i := 0; i < missesBang; i++ {
-		a.setSnap(nil, errDown{})
-	}
+	a.Mono += linkDead + time.Second
+	a.setSnap(nil, errDown{})
 	if a.Screen != scrBang {
 		t.Fatalf("J21 %s fails=%d", a.Screen, a.Fails)
 	}
@@ -241,8 +241,8 @@ func TestJourneys(t *testing.T) {
 
 	// J4 confirm idle
 	a = boot(t, day, snap)
-	tap(a, "tile:2")
-	tap(a, "act:gpu_wake")
+	tap(a, "tile:5")
+	tap(a, "act:wake")
 	a.advance(6 * time.Second)
 	if a.Screen != scrHome {
 		t.Fatalf("confirm idle %s", a.Screen)
@@ -269,16 +269,23 @@ func TestTextBoxes(t *testing.T) {
 	}{
 		{"home", boot(t, day, snap)},
 		{"detail", func() *App { a := boot(t, day, snap); tap(a, "tile:0"); return a }()},
-		{"confirm", func() *App { a := boot(t, day, snap); tap(a, "tile:2"); tap(a, "act:gpu_wake"); return a }()},
+		{"confirm", func() *App { a := boot(t, day, snap); tap(a, "tile:5"); tap(a, "act:wake"); return a }()},
+		{"backup", func() *App { a := boot(t, day, snap); tap(a, "tile:5"); return a }()},
+		{"gpu", func() *App { a := boot(t, day, snap); tap(a, "tile:2"); return a }()},
+		{"eateria", func() *App { a := boot(t, day, snap); tap(a, "tile:4"); return a }()},
+		{"pi", func() *App { a := boot(t, day, snap); tap(a, "tile:3"); return a }()},
+		{"home_rec", func() *App {
+			a := boot(t, day, snap)
+			a.Snap.Tiles[7].Camera.Recording = true
+			a.paint()
+			return a
+		}()},
 		{"camera", func() *App { a := boot(t, day, snap); tap(a, "tile:7"); return a }()},
 		{"night", boot(t, night, snap)},
 		{"bang", func() *App {
 			a := boot(t, day, snap)
-			a.Started = 0
-			a.Mono = bootGrace + time.Second
-			for i := 0; i < missesBang; i++ {
-				a.setSnap(nil, errDown{})
-			}
+			a.Mono += linkDead + time.Second
+			a.setSnap(nil, errDown{})
 			return a
 		}()},
 	}

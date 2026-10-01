@@ -19,7 +19,7 @@ func tileRect(i int) image.Rectangle {
 }
 
 func statusSummaryRect() image.Rectangle {
-	return image.Rect(118, 0, 196, statusH)
+	return image.Rect(82, 0, 168, statusH)
 }
 
 func lockRect() image.Rectangle {
@@ -30,16 +30,37 @@ func lockHit() image.Rectangle {
 	return image.Rect(W-78, H-78, W, H)
 }
 
-func actionRect() image.Rectangle {
-	return image.Rect(16, H-56, lockRect().Min.X-8, H-14)
-}
-
 func clockRect() image.Rectangle {
-	return image.Rect(2, 0, 112, statusH)
+	return image.Rect(4, 0, 78, statusH)
 }
 
 func recRect() image.Rectangle {
-	return image.Rect(252, 0, W-2, statusH)
+	return image.Rect(172, 0, 228, statusH)
+}
+
+func outTempRect() image.Rectangle {
+	return image.Rect(232, 0, W-4, statusH)
+}
+
+// actionButtons is the right-hand column on a detail page, above the lock.
+func actionButtons(n int) []image.Rectangle {
+	if n > 2 {
+		n = 2
+	}
+	if n < 1 {
+		return nil
+	}
+	x0, x1 := 222, W-6
+	y0 := headerH + 8
+	y1 := lockRect().Min.Y - 8
+	gap := 8
+	h := (y1 - y0 - gap*(n-1)) / n
+	out := make([]image.Rectangle, n)
+	for i := 0; i < n; i++ {
+		y := y0 + i*(h+gap)
+		out[i] = image.Rect(x0, y, x1, y+h)
+	}
+	return out
 }
 
 const headerH = 34

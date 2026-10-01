@@ -8,6 +8,7 @@ type Snapshot struct {
 	Schema  int    `json:"schema"`
 	TS      string `json:"ts"`
 	NextInS int    `json:"next_in_s"`
+	TempOut string `json:"temp_out,omitempty"`
 	Summary struct {
 		Warn  int    `json:"warn"`
 		Crit  int    `json:"crit"`
@@ -17,18 +18,18 @@ type Snapshot struct {
 }
 
 type Tile struct {
-	ID     string  `json:"id"`
-	Label  string  `json:"label"`
-	State  string  `json:"state"`
-	AgeS   int     `json:"age_s"`
-	Big    string  `json:"big"`
-	Cap    string  `json:"cap"`
-	L2     string  `json:"l2"`
-	L3     string  `json:"l3"`
+	ID     string    `json:"id"`
+	Label  string    `json:"label"`
+	State  string    `json:"state"`
+	AgeS   int       `json:"age_s"`
+	Big    string    `json:"big"`
+	Cap    string    `json:"cap"`
+	L2     string    `json:"l2"`
+	L3     string    `json:"l3"`
 	Spark  []float64 `json:"spark,omitempty"`
-	Pages  []Page  `json:"pages,omitempty"`
-	Screen string  `json:"screen,omitempty"`
-	Camera *Camera `json:"camera,omitempty"`
+	Pages  []Page    `json:"pages,omitempty"`
+	Screen string    `json:"screen,omitempty"`
+	Camera *Camera   `json:"camera,omitempty"`
 }
 
 type Page struct {
@@ -40,9 +41,11 @@ type Page struct {
 }
 
 type Row struct {
-	Label string
-	Value string
-	State string
+	Label  string
+	Value  string
+	State  string
+	Value2 string
+	State2 string
 }
 
 func (r *Row) UnmarshalJSON(data []byte) error {
@@ -58,6 +61,12 @@ func (r *Row) UnmarshalJSON(data []byte) error {
 	}
 	if len(arr) > 2 {
 		r.State = arr[2]
+	}
+	if len(arr) > 3 {
+		r.Value2 = arr[3]
+	}
+	if len(arr) > 4 {
+		r.State2 = arr[4]
 	}
 	if r.State == "" {
 		r.State = "ok"
@@ -77,10 +86,10 @@ type Bar struct {
 }
 
 type Action struct {
-	ID      string  `json:"id"`
-	Label   string  `json:"label"`
-	Enabled bool    `json:"enabled"`
-	Why     string  `json:"why,omitempty"`
+	ID      string   `json:"id"`
+	Label   string   `json:"label"`
+	Enabled bool     `json:"enabled"`
+	Why     string   `json:"why,omitempty"`
 	Confirm *Confirm `json:"confirm,omitempty"`
 }
 

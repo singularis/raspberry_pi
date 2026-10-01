@@ -4,17 +4,26 @@ import "testing"
 
 func TestMapLandscapeCorners(t *testing.T) {
 	c := defaultCal()
+	// Raw (3900, 200) was the top-left before the panel was rotated 180 degrees.
 	x, y := mapCal(3900, 200, c)
-	if x > 5 || y > 5 {
-		t.Fatalf("top-left %d,%d", x, y)
+	if x < W-6 || y < H-6 {
+		t.Fatalf("old top-left is now bottom-right %d,%d", x, y)
 	}
 	x, y = mapCal(200, 3900, c)
-	if x < W-6 || y < H-6 {
-		t.Fatalf("bottom-right %d,%d", x, y)
+	if x > 5 || y > 5 {
+		t.Fatalf("old bottom-right is now top-left %d,%d", x, y)
 	}
-	x, y = mapCal(3900, 3900, c)
-	if x < W-6 || y > 5 {
-		t.Fatalf("top-right %d,%d", x, y)
+}
+
+func TestFlipLegacyCal(t *testing.T) {
+	old := calFile{X0: 3900, X1: 200, Y0: 200, Y1: 3900, Swap: true}
+	x0, y0 := mapCal(3900, 200, old)
+	x1, y1 := mapCal(3900, 200, flipCal(old))
+	if absInt(x0+x1-(W-1)) > 2 || absInt(y0+y1-(H-1)) > 2 {
+		t.Fatalf("flip should be 180 degrees: (%d,%d) -> (%d,%d)", x0, y0, x1, y1)
+	}
+	if flipCal(flipCal(old)) != old {
+		t.Fatal("flip twice")
 	}
 }
 

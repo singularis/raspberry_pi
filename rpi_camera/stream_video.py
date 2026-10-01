@@ -5,15 +5,44 @@ import gc
 import io
 import os
 import struct
+import sys
 import threading
 import time
 from datetime import datetime
 
+ENC_DEV = "/dev/video11"
+
+
+def _wait_encoder(timeout=120):
+    t0 = time.monotonic()
+    while True:
+        try:
+            os.close(os.open(ENC_DEV, os.O_RDONLY))
+        except OSError:
+            if time.monotonic() - t0 > timeout:
+                return False
+            time.sleep(1)
+            continue
+        waited = int(time.monotonic() - t0)
+        if waited:
+            print("[cam] waited", waited, "s for", ENC_DEV, flush=True)
+        return True
+
+
+# Picamera2 probes the hardware encoder once at import and silently falls back to
+# software MJPEG if the probe fails. At boot udev gives the video group access to
+# /dev/video11 about 50 s after this service starts.
+if not _wait_encoder():
+    sys.exit(f"[cam] {ENC_DEV} not usable")
+
 from flask import Flask, Response, jsonify, request, send_from_directory
 from libcamera import Transform
 from picamera2 import Picamera2
-from picamera2.encoders import MJPEGEncoder, Quality
+from picamera2.encoders import MJPEGEncoder, Quality, _hw_encoder_available
 from picamera2.outputs import FileOutput
+
+if not _hw_encoder_available:
+    sys.exit("[cam] picamera2 picked software MJPEG, refusing to run")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(HERE, "web")
@@ -92,6 +121,10 @@ _buf = JpegBuf()
 def _close(cam):
     if cam is None:
         return
+    try:
+        cam.stop_encoder()
+    except Exception as exc:
+        print("[cam] stop_encoder failed", exc)
     cam.close()
     time.sleep(0.25)
 
@@ -427,16 +460,24 @@ def _rssi():
     return None
 
 
-def _unit(name):
+def _units(names):
+    """One systemctl call. The Pi is slow; four separate calls were wasted work."""
+    lines = []
     try:
         import subprocess
         r = subprocess.run(
-            ["systemctl", "is-active", name],
+            ["systemctl", "is-active", *names],
             capture_output=True, text=True, timeout=2,
         )
-        return (r.stdout or "").strip() or "unknown"
+        lines = (r.stdout or "").splitlines()
     except Exception:
-        return "unknown"
+        lines = []
+    out = {}
+    for i, name in enumerate(names):
+        key = name.replace(".service", "").replace(".timer", "").replace("-", "_")
+        state = lines[i].strip() if i < len(lines) else ""
+        out[key] = state or "unknown"
+    return out
 
 
 def _clips():
@@ -475,12 +516,12 @@ def health():
         "clips": clips_n,
         "clips_bytes": clips_b,
         "camera": _status(),
-        "units": {
-            "flask_camera": _unit("flask_camera.service"),
-            "wifi_watchdog": _unit("wifi-watchdog.timer"),
-            "motor_hours": _unit("motor-hours.service"),
-            "lcd_monitor": _unit("lcd-monitor.service"),
-        },
+        "units": _units([
+            "flask_camera.service",
+            "wifi-watchdog.timer",
+            "motor-hours.service",
+            "lcd-monitor.service",
+        ]),
     })
 
 

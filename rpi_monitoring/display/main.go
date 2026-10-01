@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -63,6 +64,14 @@ func runDevice(url string, refresh time.Duration) {
 		os.Exit(1)
 	}
 	defer disp.Close()
+	a.ActionURL = actionURL(url)
+	a.Post = func(id string) {
+		msg := postAction(a.ActionURL, id)
+		select {
+		case a.Notes <- msg:
+		default:
+		}
+	}
 	a.LocalCam = func(on bool) error {
 		v := "0"
 		if on {
@@ -84,6 +93,7 @@ func runDevice(url string, refresh time.Duration) {
 	var wasDown bool
 	var lx, ly int
 	var prev []byte
+	failWait := 5 * time.Second
 	for {
 		now = time.Now()
 		dt := now.Sub(last)
@@ -117,11 +127,24 @@ func runDevice(url string, refresh time.Duration) {
 		if now.After(nextFetch) {
 			s, err := fetchSnap(url)
 			a.setSnap(s, err)
-			wait := refresh
-			if s != nil && s.NextInS > 0 && s.NextInS < 120 {
-				wait = time.Duration(s.NextInS) * time.Second
+			if err != nil || s == nil {
+				nextFetch = now.Add(failWait)
+				switch {
+				case failWait < 10*time.Second:
+					failWait = 10 * time.Second
+				case failWait < 20*time.Second:
+					failWait = 20 * time.Second
+				default:
+					failWait = 30 * time.Second
+				}
+			} else {
+				failWait = 5 * time.Second
+				wait := refresh
+				if s.NextInS > 0 && s.NextInS < 120 {
+					wait = time.Duration(s.NextInS) * time.Second
+				}
+				nextFetch = now.Add(wait)
 			}
-			nextFetch = now.Add(wait)
 		}
 		if !bytes.Equal(prev, a.Img.Pix) {
 			disp.Blit(a.Img)
@@ -133,6 +156,31 @@ func runDevice(url string, refresh time.Duration) {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
+}
+
+func actionURL(displayURL string) string {
+	u := strings.TrimRight(displayURL, "/")
+	if i := strings.LastIndex(u, "/api/display"); i >= 0 {
+		u = u[:i]
+	}
+	return u + "/api/actions"
+}
+
+func postAction(url, id string) string {
+	body := bytes.NewBufferString(`{"id":"` + id + `"}`)
+	c := http.Client{Timeout: 5 * time.Second}
+	resp, err := c.Post(url, "application/json", body)
+	if err != nil {
+		return "failed"
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == 403 {
+		return "denied"
+	}
+	if resp.StatusCode >= 300 {
+		return "failed"
+	}
+	return "sent"
 }
 
 func fetchSnap(url string) (*Snapshot, error) {

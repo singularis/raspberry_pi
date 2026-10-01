@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"strings"
+	"time"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
@@ -114,23 +115,21 @@ func (a *App) recording() bool {
 func (a *App) paintHome(ink color.Color) {
 	fill(a.Img, image.Rect(0, 0, W, statusH), color.RGBA{0, 0, 0, 255})
 	a.put(a.F.sans14, a.Now.Format("15:04"), clockRect(), ink, false)
-	sum := "all ok"
-	if a.Snap != nil {
-		if a.Snap.Summary.Crit > 0 {
-			sum = fmt.Sprintf("%d bad", a.Snap.Summary.Crit)
-		} else if a.Snap.Summary.Warn > 0 {
-			sum = fmt.Sprintf("%d warn", a.Snap.Summary.Warn)
-		}
-	}
-	if a.Screen == scrGrey || a.Snap == nil {
-		sum = "none"
-	}
+	sum, sumCol := a.statusLine()
 	if a.Toast != "" {
 		sum = a.Toast
+		sumCol = ink
 	}
-	a.put(a.F.sans14, sum, statusSummaryRect(), ink, true)
+	a.put(a.F.sans14, sum, statusSummaryRect(), sumCol, true)
 	if a.recording() {
 		a.put(a.F.sans14, "REC", recRect(), color.RGBA{255, 80, 80, 255}, true)
+	}
+	if a.Snap != nil && a.Snap.TempOut != "" {
+		tc := ink
+		if a.nightLook() {
+			tc = nightInk()
+		}
+		a.put(a.F.sans14, a.Snap.TempOut, outTempRect(), tc, true)
 	}
 	if a.Snap == nil {
 		return
@@ -222,6 +221,27 @@ func (a *App) paintTile(r image.Rectangle, t Tile, fg color.Color) {
 	a.put(a.F.sans14, tileCap(t), image.Rect(x0, r.Max.Y-3-capH, x1, r.Max.Y-3), fg, true)
 }
 
+func (a *App) statusLine() (string, color.Color) {
+	grey := color.RGBA{156, 163, 175, 255}
+	if a.Screen == scrGrey || a.Snap == nil {
+		return "none", grey
+	}
+	if a.LastOK > 0 && a.Mono-a.LastOK >= staleAfter {
+		m := int((a.Mono - a.LastOK) / time.Minute)
+		if m < 1 {
+			m = 1
+		}
+		return fmt.Sprintf("old %dm", m), grey
+	}
+	if a.Snap.Summary.Crit > 0 {
+		return fmt.Sprintf("%d bad", a.Snap.Summary.Crit), color.RGBA{248, 113, 113, 255}
+	}
+	if a.Snap.Summary.Warn > 0 {
+		return fmt.Sprintf("%d warn", a.Snap.Summary.Warn), color.RGBA{251, 191, 36, 255}
+	}
+	return "all ok", color.RGBA{74, 222, 128, 255}
+}
+
 func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 	t := a.cur()
 	fill(a.Img, image.Rect(0, 0, W, headerH), dayFill("off"))
@@ -247,35 +267,111 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 		return
 	}
 	p := t.Pages[a.Page]
-	lh := faceH(a.F.sans20) + 1
-	y := headerH + 4
-	bot := lockRect().Min.Y - 4
-	if len(p.Actions) > 0 {
-		bot = actionRect().Min.Y - 4
+	rows := append([]Row{}, p.Rows...)
+	if t.ID == "pi" {
+		val, st := "none", "crit"
+		if a.CamOK {
+			val, st = "ok", "ok"
+		}
+		rows = append(rows, Row{Label: "cam", Value: val, State: st})
 	}
-	n := 0
-	for _, row := range p.Rows {
-		if n >= 6 || y+lh > bot {
+	dual := false
+	for _, row := range rows {
+		if row.Value2 != "" {
+			dual = true
 			break
 		}
-		a.put(a.F.sans20, row.Label, image.Rect(8, y, 148, y+lh), white, false)
-		a.put(a.F.sans20, row.Value, image.Rect(152, y, W-8, y+lh), metricInk(row.State), false)
-		y += lh
+	}
+	face := a.F.sans20
+	pitch := faceH(face) + 1
+	if len(rows) >= 9 {
+		face = a.F.sans17
+		pitch = 22
+	}
+	right := W - 8
+	btns := actionButtons(len(p.Actions))
+	if len(btns) > 0 {
+		right = btns[0].Min.X - 6
+	}
+	y := headerH + 2
+	if dual {
+		hh := faceH(a.F.sans11)
+		a.put(a.F.sans11, "now", image.Rect(100, y, 156, y+hh), white, false)
+		a.put(a.F.sans11, "prev", image.Rect(160, y, right, y+hh), white, false)
+		y += hh + 1
+	}
+	n := 0
+	for _, row := range rows {
+		if n >= 9 || y >= H-2 {
+			break
+		}
+		a.paintMetricRow(face, row, y, pitch, right, dual)
+		y += pitch
 		n++
 	}
 	if n == 0 {
 		a.put(a.F.mono32, shortNum(t.Big), image.Rect(12, headerH+16, W-12, headerH+80), white, true)
 	}
-	if len(p.Actions) > 0 {
-		act := p.Actions[0]
-		r := actionRect()
-		c := dayFill("ok")
-		if !act.Enabled {
-			c = dayFill("off")
+	for i, act := range p.Actions {
+		if i >= len(btns) {
+			break
 		}
-		fill(a.Img, r, c)
-		a.put(a.F.sans22, shortWord(act.Label), r.Inset(6), white, true)
+		a.paintAction(btns[i], act)
 	}
+}
+
+func (a *App) paintMetricRow(face font.Face, row Row, y, pitch, right int, dual bool) {
+	x1 := right
+	lock := lockRect()
+	if y < lock.Max.Y && y+pitch > lock.Min.Y && x1 > lock.Min.X-4 {
+		x1 = lock.Min.X - 4
+	}
+	white := color.RGBA{255, 255, 255, 255}
+	if !dual {
+		a.put(face, row.Label, image.Rect(8, y, 118, y+pitch), white, false)
+		a.put(face, row.Value, image.Rect(122, y, x1, y+pitch), metricInk(row.State), false)
+		return
+	}
+	a.put(face, row.Label, image.Rect(8, y, 96, y+pitch), white, false)
+	a.put(face, row.Value, image.Rect(100, y, 156, y+pitch), metricInk(row.State), false)
+	if row.Value2 != "" && 160 < x1 {
+		a.put(face, row.Value2, image.Rect(160, y, x1, y+pitch), metricInk(row.State2), false)
+	}
+}
+
+func (a *App) paintAction(r image.Rectangle, act Action) {
+	c := dayFill("ok")
+	if !act.Enabled {
+		c = dayFill("off")
+	}
+	fill(a.Img, r, c)
+	white := color.RGBA{255, 255, 255, 255}
+	lines := buttonLines(act.Label)
+	if len(lines) <= 1 {
+		label := ""
+		if len(lines) == 1 {
+			label = lines[0]
+		}
+		a.put(a.F.sans20, label, r.Inset(4), white, true)
+		return
+	}
+	h := faceH(a.F.sans20)
+	total := h*2 + 2
+	y := r.Min.Y + (r.Dy()-total)/2
+	if y < r.Min.Y {
+		y = r.Min.Y
+	}
+	a.put(a.F.sans20, lines[0], image.Rect(r.Min.X+4, y, r.Max.X-4, y+h), white, true)
+	y += h + 2
+	a.put(a.F.sans20, lines[1], image.Rect(r.Min.X+4, y, r.Max.X-4, y+h), white, true)
+}
+
+func buttonLines(label string) []string {
+	f := strings.Fields(label)
+	if len(f) <= 1 {
+		return f
+	}
+	return []string{f[0], strings.Join(f[1:], " ")}
 }
 
 func (a *App) paintConfirm() {
@@ -400,6 +496,18 @@ func (a *App) hit(x, y int) string {
 			return "start"
 		}
 	case scrDetail:
+		if t := a.cur(); t != nil && a.Page < len(t.Pages) {
+			acts := t.Pages[a.Page].Actions
+			btns := actionButtons(len(acts))
+			for i, act := range acts {
+				if i >= len(btns) {
+					break
+				}
+				if p.In(btns[i]) {
+					return "act:" + act.ID
+				}
+			}
+		}
 		if p.In(lockHit()) {
 			return "lock"
 		}
@@ -408,12 +516,6 @@ func (a *App) hit(x, y int) string {
 		}
 		if p.In(image.Rect(W-80, 0, W, headerH)) {
 			return "page"
-		}
-		if t := a.cur(); t != nil && a.Page < len(t.Pages) && len(t.Pages[a.Page].Actions) > 0 {
-			act := t.Pages[a.Page].Actions[0]
-			if p.In(actionRect()) {
-				return "act:" + act.ID
-			}
 		}
 	case scrHome, scrGrey:
 		if p.In(clockRect()) {

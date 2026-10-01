@@ -14,7 +14,12 @@ type calFile struct {
 var hwCal = defaultCal()
 
 func defaultCal() calFile {
-	return calFile{X0: 3900, X1: 200, Y0: 200, Y1: 3900, Swap: true}
+	// Endpoints swapped once for the 180 degree panel (MADCTL 0xE8).
+	return flipCal(calFile{X0: 3900, X1: 200, Y0: 200, Y1: 3900, Swap: true})
+}
+
+func flipCal(c calFile) calFile {
+	return calFile{X0: c.X1, X1: c.X0, Y0: c.Y1, Y1: c.Y0, Swap: c.Swap}
 }
 
 func axisScale(raw, a, b, span int) int {

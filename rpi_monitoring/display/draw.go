@@ -19,6 +19,7 @@ const (
 type faces struct {
 	sans11 font.Face
 	sans14 font.Face
+	sans17 font.Face
 	sans20 font.Face
 	sans22 font.Face
 	sans28 font.Face
@@ -40,6 +41,7 @@ func loadFaces() *faces {
 	return &faces{
 		sans11: mk(sans, 11),
 		sans14: mk(sans, 14),
+		sans17: mk(sans, 17),
 		sans20: mk(sans, 20),
 		sans22: mk(sans, 22),
 		sans28: mk(sans, 28),

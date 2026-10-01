@@ -41,24 +41,22 @@ def gpu_state(on, should_on, vllm_ready, vllm_late, claw_ok, temp):
     return worst(*states)
 
 
-def pi_state(temp, ram_free, sd_pct, throttled_now, throttled_boot):
-    if temp is None and ram_free is None and sd_pct is None and not throttled_now and not throttled_boot:
+def pi_state(temp, ram_used_pct, sd_pct, throttled_now, throttled_boot):
+    if temp is None and ram_used_pct is None and sd_pct is None and not throttled_now and not throttled_boot:
         return "stale"
     states = ["ok"]
-    if throttled_now or (ram_free is not None and ram_free < 30) or (sd_pct is not None and sd_pct > 95):
+    if throttled_now or (sd_pct is not None and sd_pct > 95) or (ram_used_pct is not None and ram_used_pct >= 70):
         states.append("crit")
-    if throttled_boot or (temp is not None and temp > 70) or (ram_free is not None and ram_free < 60) or (sd_pct is not None and 85 < (sd_pct or 0) <= 95):
+    if throttled_boot or (temp is not None and temp > 70) or (sd_pct is not None and 85 < (sd_pct or 0) <= 95):
         states.append("warn")
     return worst(*states)
 
 
-def eater_state(prod_ok, prod_ms, dev_ok, health_ok, argo_bad, stats_bad):
+def eater_state(prod_ok, health_ok):
+    """Tile color follows prod only. Dev is a row, not a color."""
     if not prod_ok or not health_ok:
         return "crit"
-    states = ["ok"]
-    if not dev_ok or (prod_ms is not None and prod_ms > 1000) or argo_bad or stats_bad:
-        states.append("warn")
-    return worst(*states)
+    return "ok"
 
 
 def backup_state(last_ok, overdue, partial, capacity_bad, smart_bad, running):
@@ -119,6 +117,7 @@ def build(facts):
             "racoon", "RACOON",
             node_state(rac.get("ready", True), rac.get("cpu"), rac.get("ram_pct"), rac.get("disk_pct"), rac.get("temp")),
             big=_pct(rac.get("cpu"), "cpu"),
+            cap="cpu",
             l2="ram " + _pct(rac.get("ram_pct"), ""),
             l3=_temp(rac.get("temp")),
             pages=_node_rows(rac, ["root", "other_ssd", "other_hdd"]),
@@ -166,42 +165,51 @@ def _gpu_tile(gpu):
     watt_s = "" if watts is None else " " + str(int(round(watts))) + "W"
     if not on:
         big, l2 = "OFF", "since " + (gpu.get("off_since") or "--")
+        rows = [
+            _row("cpu", "off", "off"),
+            _row("ram free", "off", "off"),
+            _row("gpu", "off", "off"),
+            _row("gpu ram", "off", "off"),
+            _row("staging free", "off", "off"),
+            _row("/ free", "off", "off"),
+            _row("temp", "off", "off"),
+            _row("gpu temp", "off", "off"),
+            _row("k8s", "off", "off"),
+        ]
+        pages = [{"rows": rows}]
     else:
         big, l2 = _temp(gpu.get("temp")), "vllm " + ("up" if gpu.get("vllm") else "down") + watt_s
-    node = {
-        "cpu": gpu.get("cpu"),
-        "ram_pct": gpu.get("ram_pct"),
-        "free_gb": gpu.get("free_gb"),
-        "temp": gpu.get("cpu_temp"),
-        "gpu_temp": gpu.get("temp"),
-        "disks": list(gpu.get("disks") or []),
-    }
-    for extra in gpu.get("extra_disks") or []:
-        node["disks"].append(extra)
-    pages = _node_rows(node, ["staging", "archive", "proxmox", "racoon", "root"])
-    if gpu.get("claw_lines"):
-        pages.append({"rows": [_row("claw", ln, "warn" if claw_ok is False else "ok") for ln in gpu.get("claw_lines")[:4]]})
-    if not on:
-        pages.append({"actions": [{
-            "id": "wake",
-            "label": "Wake GPU",
-            "enabled": True,
-            "why": "",
-            "confirm": {"title": "Wake GPU host?", "body": "Boots Proxmox and racoon-gpu"},
-        }]})
+        node = {
+            "cpu": gpu.get("cpu"),
+            "ram_pct": gpu.get("ram_pct"),
+            "free_gb": gpu.get("free_gb"),
+            "temp": gpu.get("cpu_temp"),
+            "k8s": gpu.get("k8s"),
+        }
+        rows = [_cpu_row(node.get("cpu")), _ram_row(node), _gpu_load_row(gpu.get("load")), _vram_row(gpu)]
+        if gpu.get("staging_mounted"):
+            rows.append(_disk_row("staging", gpu.get("staging_used_pct"), gpu.get("staging_free_gb")))
+        else:
+            rows.append(_row("staging free", "off", "off"))
+        rows.append(_disk_row("root", gpu.get("root_pct"), gpu.get("root_free_gb")))
+        rows.append(_temp_row("temp", node.get("temp"), 75, 85))
+        rows.append(_temp_row("gpu temp", gpu.get("temp"), 83, 90))
+        rows.append(_k8s_row(node))
+        pages = [{"rows": rows}]
+        if gpu.get("claw_lines"):
+            pages.append({"rows": [_row("claw", ln, "warn" if claw_ok is False else "ok") for ln in gpu.get("claw_lines")[:4]]})
     return tile("gpu", "GPU", st, big, l2=l2, l3="openclaw " + ("ok" if claw_ok else "warn" if claw_ok is False else "--"), pages=pages)
 
 
 def _pi_tile(pi):
     sd = pi.get("sd_pct")
-    st = pi_state(pi.get("temp"), pi.get("ram_free"), sd, pi.get("throttled_now"), pi.get("throttled_boot"))
-    power = "bad" if pi.get("throttled_now") or pi.get("throttled_boot") else "ok"
     free_mb = pi.get("ram_free")
     total_mb = pi.get("ram_mb")
-    free_pct = (100 * free_mb / total_mb) if free_mb and total_mb else None
-    pi_node = {"cpu": pi.get("cpu"), "free_gb": (free_mb / 1024) if free_mb is not None else None, "ram_pct": (100 - free_pct) if free_pct is not None else None, "temp": pi.get("temp")}
-    rows = [_cpu_row(pi.get("cpu")), _ram_row(pi_node)]
-    rows.append(_disk_row("sd", pi.get("sd_pct"), (pi.get("sd_free_mb") or 0) / 1024 if pi.get("sd_free_mb") is not None else None))
+    used = (100 * (1 - free_mb / total_mb)) if free_mb is not None and total_mb else None
+    st = pi_state(pi.get("temp"), used, sd, pi.get("throttled_now"), pi.get("throttled_boot"))
+    power = "bad" if pi.get("throttled_now") or pi.get("throttled_boot") else "ok"
+    rows = [_cpu_row(pi.get("cpu")), _pi_ram_row(used, free_mb)]
+    rows.append(_disk_row("sd", pi.get("sd_pct"), (pi.get("sd_free_mb") / 1024) if pi.get("sd_free_mb") is not None else None))
     rows.append(_temp_row("temp", pi.get("temp"), 70, 80))
     rows.append(_row("power", power, "crit" if power == "bad" else "ok"))
     return tile(
@@ -215,22 +223,21 @@ def _pi_tile(pi):
 
 
 def _eater_tile(eat):
-    st = eater_state(eat.get("prod_ok", True), eat.get("prod_ms"), eat.get("dev_ok", True), eat.get("health_ok", True), eat.get("argo_bad"), eat.get("stats_bad"))
-    dishes = eat.get("dishes")
-    big = ("+" + str(dishes)) if dishes is not None else "--"
-    hop = eat.get("hop") or ""
-    l3 = "prod+dev ok" if st == "ok" else (hop or "check failed")
+    st = eater_state(eat.get("prod_ok", True), eat.get("health_ok", True))
+    scans = eat.get("scans_today")
+    big = _n(scans)
     return tile(
         "eateria", "EATERIA", st, big,
-        l2="dishes today",
-        l3=l3,
+        cap="scans",
+        l3="prod ok" if st == "ok" else "down",
         pages=[{"rows": [
-            _row("scans", _n(eat.get("scans_today")), "ok"),
-            _row("users", _n(eat.get("users_today")), "ok"),
-            _row("anon", _n(eat.get("anon_today")), "ok"),
-            _row("ascans", _n(eat.get("anon_scans")), "ok"),
-            _row("dishes", _n(eat.get("dishes")), "ok"),
-            _row("7d", _n(eat.get("active_7d")), "ok"),
+            _cmp("scans", eat.get("scans_today"), eat.get("scans_yday")),
+            _cmp("users", eat.get("users_today"), eat.get("users_yday")),
+            _cmp("anon", eat.get("anon_today"), eat.get("anon_yday")),
+            _cmp("ascans", eat.get("ascans_today"), eat.get("ascans_yday")),
+            _cmp("7d scans", eat.get("scans_7d"), eat.get("scans_prev7")),
+            _cmp("7d users", eat.get("users_7d"), eat.get("users_prev7")),
+            _row("dev", "up" if eat.get("dev_ok") else "down", "ok" if eat.get("dev_ok") else "crit"),
         ]}],
     )
 
@@ -241,21 +248,35 @@ def _backup_tile(bak):
     arch = bak.get("archive_free_gb")
     arch_on = bak.get("archive_mounted")
     big = "RUN" if bak.get("running") else (_tb(stag) if stag is not None else _ago(bak.get("age_d")))
-    pages = [{"actions": [{
-        "id": "backup",
-        "label": "Run backup",
-        "enabled": not bak.get("running"),
-        "why": "already running" if bak.get("running") else "",
-        "confirm": {"title": "Run backup now?", "body": "Starts the staging sync"},
-    }]}]
+    gpu_on = bool(bak.get("gpu_on"))
+    actions = [
+        {
+            "id": "wake",
+            "label": "Wake GPU",
+            "enabled": not gpu_on,
+            "why": "" if not gpu_on else "GPU on",
+            "confirm": {"title": "Wake GPU host?", "body": "Boots Proxmox and racoon-gpu", "verb": "Wake"},
+        },
+        {
+            "id": "backup",
+            "label": "Run backup",
+            "enabled": not bak.get("running"),
+            "why": "already running" if bak.get("running") else "",
+            "confirm": {"title": "Run backup now?", "body": "Starts the staging sync", "verb": "Run"},
+        },
+    ]
     cap = "arc off" if arch_on is False else ("arc " + _tb(arch))
     if bak.get("running"):
         cap = "running"
+    if gpu_on and bak.get("staging_mounted"):
+        staging_row = _disk_row("staging", bak.get("staging_used_pct"), stag)
+    else:
+        staging_row = _row("staging free", "off", "off")
     pages = [{"rows": [
-        _disk_row("staging", bak.get("staging_used_pct"), stag),
+        staging_row,
         _disk_row("archive", bak.get("archive_used_pct"), arch) if arch_on else _row("archive", "off", "off"),
         _row("last", _ago(bak.get("age_d")), "ok" if bak.get("last_ok", True) else "crit"),
-    ], "actions": pages[0]["actions"]}]
+    ], "actions": actions}]
     return tile("backup", "BACKUP", st, big, cap=cap, l2=bak.get("next") or "", l3="archive " + (bak.get("archive") or "--"), pages=pages)
 
 
@@ -305,27 +326,79 @@ def _ram_row(node):
     used = node.get("ram_pct")
     free_pct = (100 - used) if used is not None else None
     free_gb = node.get("free_gb")
-    mb = int(round(free_gb * 1024)) if free_gb is not None else None
-    if free_pct is None and mb is None:
+    if free_pct is None and free_gb is None:
         text, st = "--", "stale"
     else:
-        text = _pct(free_pct, "")
-        if mb is not None:
-            text = text + " " + str(mb) + "M"
+        text = _free_text(free_pct, free_gb)
         st = _lvl_low(free_gb, 1.0, 0.7) if free_gb is not None and free_gb < 2 else _lvl_low(free_pct, 20, 10)
-    return _row("ram", text, st)
+    return _row("ram free", text, st)
+
+
+def _pi_ram_row(used_pct, free_mb):
+    free_gb = (free_mb / 1024) if free_mb is not None else None
+    free_pct = (100 - used_pct) if used_pct is not None else None
+    if free_pct is None and free_gb is None:
+        return _row("ram free", "--", "stale")
+    st = "crit" if used_pct is not None and used_pct >= 70 else "ok"
+    return _row("ram free", _free_text(free_pct, free_gb), st)
+
+
+def _gpu_load_row(pct):
+    return _row("gpu", _pct(pct, ""), "ok" if pct is not None else "stale")
+
+
+def _vram_row(gpu):
+    free = gpu.get("vram_free_mb")
+    total = gpu.get("vram_total_mb")
+    if free is None:
+        return _row("gpu ram", "--", "stale")
+    free_gb = free / 1024
+    pct = (100 * free / total) if total else None
+    return _row("gpu ram", _free_text(pct, free_gb), "ok")
+
+
+def _k8s_row(node):
+    v = node.get("k8s")
+    if v is True:
+        return _row("k8s", "up", "ok")
+    if v is False:
+        return _row("k8s", "down", "crit")
+    return _row("k8s", "--", "stale")
+
+
+def _count_state(v):
+    if v is None:
+        return "stale"
+    if v >= 1:
+        return "ok"
+    return "stale"
+
+
+def _cmp(label, today, prev):
+    return [label, _n(today), _count_state(today), _n(prev), _count_state(prev)]
 
 
 def _temp_row(label, celsius, warn, crit):
     return _row(label, _temp(celsius), _lvl_high(celsius, warn, crit))
 
 
+def _disk_label(name):
+    return {
+        "root": "/ free",
+        "other_ssd": "ssd free",
+        "other_hdd": "hdd free",
+        "sd": "sd free",
+        "staging": "staging free",
+        "archive": "archive",
+    }.get(name, name)
+
+
 def _disk_row(name, pct_used, free_gb):
-    text = _gb(free_gb)
-    if pct_used is not None:
-        free_pct = max(0, 100 - pct_used)
-        text = _pct(free_pct, "") + " " + text
-    return _row(name, text, _lvl_high(pct_used, 85, 95))
+    free_pct = max(0, 100 - pct_used) if pct_used is not None else None
+    text = _free_text(free_pct, free_gb)
+    if text == "--" and free_gb is None and pct_used is None:
+        return _row(_disk_label(name), "--", "stale")
+    return _row(_disk_label(name), text, _lvl_high(pct_used, 85, 95) if pct_used is not None else "stale")
 
 
 def _pick_disks(disks, names):
@@ -339,10 +412,11 @@ def _node_rows(node, disk_names, gpu_temp=None):
         rows.append(_disk_row(d.get("name") or "disk", d.get("pct"), d.get("free_gb")))
     rows.append(_temp_row("temp", node.get("temp"), 75, 85))
     if gpu_temp is not None or node.get("gpu_temp") is not None:
-        rows.append(_temp_row("gpu", node.get("gpu_temp", gpu_temp), 83, 90))
+        rows.append(_temp_row("gpu temp", node.get("gpu_temp", gpu_temp), 83, 90))
+    rows.append(_k8s_row(node))
     pages = []
-    for i in range(0, len(rows), 6):
-        pages.append({"rows": rows[i:i + 6]})
+    for i in range(0, len(rows), 9):
+        pages.append({"rows": rows[i:i + 9]})
     return pages
 
 
@@ -363,10 +437,32 @@ def _temp(v):
     return str(int(round(v))) + "C"
 
 
-def _gb(v):
-    if v is None:
+def _free_text(free_pct, free_gb):
+    amt = _amt(free_gb)
+    pct = _pct(free_pct, "")
+    if pct == "--" and amt == "--":
         return "--"
-    return f"{v:.1f}G"
+    if pct == "--":
+        return amt
+    if amt == "--":
+        return pct
+    return pct + " " + amt
+
+
+def _amt(gb):
+    if gb is None:
+        return "--"
+    if gb < 1:
+        return str(int(round(gb * 1024))) + "M"
+    if gb >= 1024:
+        return f"{gb / 1024:.1f}T"
+    if gb >= 10:
+        return str(int(round(gb))) + "G"
+    return f"{gb:.1f}G"
+
+
+def _gb(v):
+    return _amt(v)
 
 
 def _ms(v):

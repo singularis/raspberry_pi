@@ -125,7 +125,7 @@ func openHardware() (panel, touchDev, error) {
 	p.cmd(0x11)
 	time.Sleep(120 * time.Millisecond)
 	p.cmd(0x3A, 0x55)
-	p.cmd(0x36, 0x28)
+	p.cmd(0x36, 0xE8) // MY|MX|MV|BGR: 180 degrees from the old landscape (0x28)
 	p.cmd(0xB1, 0x00, 0x18)
 	p.cmd(0x53, 0x2C)
 	p.cmd(0x51, 0xE0) // day ~7/8 if the hat wires brightness
@@ -167,12 +167,25 @@ func loadCal(a *App) {
 	if cal == nil {
 		return
 	}
-	a.CalSaved = true
-	hwCal = calFile{
+	c := calFile{
 		X0: num(cal["x0"]), X1: num(cal["x1"]),
 		Y0: num(cal["y0"]), Y1: num(cal["y1"]),
 		Swap: cal["swap"] == true || num(cal["swap"]) == 1,
 	}
+	// A file saved before the 180 degree flip has no rot. Invert it once.
+	if _, ok := cal["rot"]; !ok {
+		c = flipCal(c)
+		swap := 0
+		if c.Swap {
+			swap = 1
+		}
+		touch["cal"] = map[string]int{"x0": c.X0, "x1": c.X1, "y0": c.Y0, "y1": c.Y1, "swap": swap, "rot": 3}
+		if out, err := json.MarshalIndent(doc, "", "  "); err == nil {
+			_ = os.WriteFile(calPath(), out, 0o644)
+		}
+	}
+	hwCal = c
+	a.CalSaved = true
 }
 
 func num(v any) int {
@@ -209,7 +222,7 @@ func saveCal(a *App) {
 	if c.Swap {
 		swap = 1
 	}
-	touch["cal"] = map[string]int{"x0": c.X0, "x1": c.X1, "y0": c.Y0, "y1": c.Y1, "swap": swap}
+	touch["cal"] = map[string]int{"x0": c.X0, "x1": c.X1, "y0": c.Y0, "y1": c.Y1, "swap": swap, "rot": 3}
 	out, _ := json.MarshalIndent(doc, "", "  ")
 	_ = os.WriteFile(calPath(), out, 0o644)
 	a.CalSaved = true

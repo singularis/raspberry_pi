@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 
 
-def snap(tiles, next_in_s=60):
+def snap(tiles, next_in_s=60, temp_out=None):
     warn = sum(1 for t in tiles if t["state"] == "warn")
     crit = sum(1 for t in tiles if t["state"] == "crit")
     worst = ""
@@ -16,13 +16,16 @@ def snap(tiles, next_in_s=60):
             if t["state"] == "warn":
                 worst = t["id"]
                 break
-    return {
+    body = {
         "schema": 1,
         "ts": datetime.now(timezone.utc).isoformat(),
         "next_in_s": next_in_s,
         "summary": {"warn": warn, "crit": crit, "worst": worst},
         "tiles": tiles,
     }
+    if temp_out is not None:
+        body["temp_out"] = str(int(round(float(temp_out)))) + "\u00b0C"
+    return body
 
 
 def tile(tid, label, state, big, l2="", l3="", cap="", spark=None, pages=None, screen="", camera=None):

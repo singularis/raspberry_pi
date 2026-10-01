@@ -25,12 +25,15 @@ def test_states():
     assert gpu_state(False, True, False, True, None, None) == "off"
     assert gpu_state(True, True, False, True, True, 40) == "crit"
     assert gpu_state(True, True, True, False, False, 40) == "warn"
-    assert pi_state(47, 174, 40, False, False) == "ok"
+    assert pi_state(47, 40, 40, False, False) == "ok"
     assert pi_state(None, None, None, False, False) == "stale"
     assert node_state(True, None, None, None, None) == "stale"
     assert pi_state(47, 20, 40, True, False) == "crit"
-    assert eater_state(False, 10, True, True, False, False) == "crit"
-    assert eater_state(True, 1500, False, True, False, False) == "warn"
+    assert pi_state(47, 70, 40, False, False) == "crit"
+    assert pi_state(47, 69, 40, False, False) == "ok"
+    assert eater_state(False, True) == "crit"
+    assert eater_state(True, False) == "crit"
+    assert eater_state(True, True) == "ok"
     assert backup_state(False, False, False, False, False, False) == "crit"
     assert backup_state(True, False, False, False, False, True) == "busy"
     assert backup_state(True, True, False, False, False, False) == "warn"
@@ -65,11 +68,26 @@ def test_detail_pages():
     by = {t["id"]: t for t in tiles}
     names = [r[0] for r in by["racoon"]["pages"][0]["rows"]]
     assert names[0] == "cpu"
-    assert "other_hdd" in names and "root" in names
-    assert by["worker"]["pages"]
+    assert names[1] == "ram free"
+    assert "/ free" in names and "hdd free" in names
+    assert names[-1] == "k8s"
+    assert by["racoon"]["cap"] == "cpu"
+    assert by["worker"]["pages"][0]["rows"][-1][0] == "k8s"
     assert by["pi"]["pages"][0]["rows"][0][0] == "cpu"
-    assert by["eateria"]["pages"][0]["rows"][0][0] == "scans"
-    assert by["eateria"]["pages"][0]["rows"][1][0] == "users"
+    assert by["pi"]["pages"][0]["rows"][1][0] == "ram free"
+    eat_rows = by["eateria"]["pages"][0]["rows"]
+    assert eat_rows[0][0] == "scans"
+    assert eat_rows[1][0] == "users"
+    assert eat_rows[-1] == ["dev", "up", "ok"]
+    assert by["eateria"]["big"] == "8"
+    assert by["eateria"]["state"] == "ok"
+    gpu_rows = by["gpu"]["pages"][0]["rows"]
+    assert len(gpu_rows) == 9
+    assert all(r[2] == "off" for r in gpu_rows)
+    assert "actions" not in by["gpu"]["pages"][0]
+    assert by["backup"]["pages"][0]["actions"][0]["id"] == "wake"
+    assert by["backup"]["pages"][0]["actions"][1]["id"] == "backup"
+    assert by["backup"]["pages"][0]["rows"][0] == ["staging free", "off", "off"]
     assert by["network"]["pages"][0]["rows"][0][0] == "ping"
     assert by["network"]["pages"][0]["rows"][2][0] == "pihole"
     assert by["network"]["big"].endswith("ms")

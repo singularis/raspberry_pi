@@ -29,6 +29,12 @@ jobs:
       - name: Set image tag
         run: echo "TAG=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
 
+      - name: Test
+        working-directory: rpi_monitoring/collector
+        run: |
+          python3 -m pip install -r requirements.txt pytest
+          python3 -m pytest -q
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:

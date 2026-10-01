@@ -1,14 +1,12 @@
 package main
 
-func f64(v float64) *float64 { return &v }
-
 func tile(id, label, state, big, cap, l2, l3 string, spark []float64) Tile {
 	return Tile{ID: id, Label: label, State: state, Big: big, Cap: cap, L2: l2, L3: l3, Spark: spark, AgeS: 4,
 		Pages: []Page{{Rows: []Row{{Label: "state", Value: state}, {Label: "value", Value: big}}}}}
 }
 
 func baseSnap() *Snapshot {
-	s := &Snapshot{Schema: 1, TS: "2026-09-26T15:43:00+01:00", NextInS: 58}
+	s := &Snapshot{Schema: 1, TS: "2026-09-26T15:43:00+01:00", NextInS: 58, TempOut: "16\u00b0C"}
 	s.Tiles = []Tile{
 		tile("racoon", "RACOON", "ok", "37%", "cpu", "ram 41%", "56C 35W", []float64{30, 33, 37, 36, 37}),
 		tile("worker", "WORKER", "ok", "1.8G", "ram free", "cpu 23%", "52C 9W", []float64{2.0, 1.9, 1.8, 1.8}),
@@ -20,23 +18,63 @@ func baseSnap() *Snapshot {
 		{ID: "camera", Label: "CAMERA", State: "idle", Big: "REC", Cap: "ready", L2: "SD 8.0G", L3: "~5h left", Screen: "camera",
 			Camera: &Camera{Phase: "idle", MaxS: 1800, SDFree: "8.0G", HoursLeft: 5, Note: "live view pauses while recording"}},
 	}
-	s.Tiles[2].Pages = []Page{{
-		Rows: []Row{{Label: "state", Value: "off"}, {Label: "on", Value: "08:00"}},
-		Actions: []Action{{ID: "gpu_wake", Label: "Wake GPU", Enabled: true, Confirm: &Confirm{Title: "Wake GPU host?", Body: "Boots Proxmox and racoon-gpu", Verb: "Wake"}}},
+	s.Tiles[2].Pages = []Page{{Rows: []Row{
+		{Label: "cpu", Value: "off", State: "off"},
+		{Label: "ram free", Value: "off", State: "off"},
+		{Label: "gpu", Value: "off", State: "off"},
+		{Label: "gpu ram", Value: "off", State: "off"},
+		{Label: "staging free", Value: "off", State: "off"},
+		{Label: "/ free", Value: "off", State: "off"},
+		{Label: "temp", Value: "off", State: "off"},
+		{Label: "gpu temp", Value: "off", State: "off"},
+		{Label: "k8s", Value: "off", State: "off"},
+	}}}
+	s.Tiles[5].Pages = []Page{{
+		Rows: []Row{
+			{Label: "staging free", Value: "off", State: "off"},
+			{Label: "archive", Value: "off", State: "off"},
+			{Label: "last", Value: "4d", State: "ok"},
+		},
+		Actions: []Action{
+			{ID: "wake", Label: "Wake GPU", Enabled: true, Confirm: &Confirm{Title: "Wake GPU host?", Body: "Boots Proxmox and racoon-gpu", Verb: "Wake"}},
+			{ID: "backup", Label: "Run backup", Enabled: true, Confirm: &Confirm{Title: "Run backup now?", Body: "Starts the staging sync", Verb: "Run"}},
+		},
 	}}
-	s.Tiles[5].Pages = []Page{
-		{Rows: []Row{{Label: "last", Value: "ok"}, {Label: "next", Value: "3d"}}, Actions: []Action{{ID: "backup_run", Label: "Run backup", Enabled: true, Confirm: &Confirm{Title: "Run full backup?", Body: "Wakes GPU, powers 12 TB, rsync + restic", Verb: "Run"}}}},
-		{Bars: []Bar{{Label: "staging", Pct: 40}, {Label: "archive", Pct: 61}}},
-	}
 	s.Tiles[0].Pages = []Page{
-		{Chart: &Chart{Label: "cpu", Points: []float64{30, 33, 37}}, Rows: []Row{{Label: "cpu", Value: "37%", State: "ok"}, {Label: "ram", Value: "41%", State: "ok"}}},
+		{Rows: []Row{
+			{Label: "cpu", Value: "37%", State: "ok"},
+			{Label: "ram free", Value: "63% 40G", State: "ok"},
+			{Label: "/ free", Value: "34% 117G", State: "ok"},
+			{Label: "ssd free", Value: "48% 461G", State: "ok"},
+			{Label: "hdd free", Value: "26% 480G", State: "ok"},
+			{Label: "temp", Value: "56C", State: "ok"},
+			{Label: "k8s", Value: "up", State: "ok"},
+		}},
 		{Rows: []Row{{Label: "nodes", Value: "2/3"}, {Label: "pods", Value: "ok"}}},
 	}
-	s.Tiles[1].Pages = []Page{{Chart: &Chart{Label: "ram free", Points: []float64{2, 1.8, 1.6}, Line: f64(1)}, Rows: []Row{{Label: "ram", Value: "1.8G"}, {Label: "cpu", Value: "23%"}}}}
-	s.Tiles[4].Pages = []Page{
-		{Rows: []Row{{Label: "scans", Value: "8"}, {Label: "users", Value: "1"}, {Label: "anon", Value: "3"}}},
-		{Rows: []Row{{Label: "dishes", Value: "+23"}, {Label: "7d", Value: "57"}}},
-	}
+	s.Tiles[1].Pages = []Page{{Rows: []Row{
+		{Label: "cpu", Value: "23%", State: "ok"},
+		{Label: "ram free", Value: "27% 1.9G", State: "ok"},
+		{Label: "/ free", Value: "41% 49G", State: "ok"},
+		{Label: "temp", Value: "52C", State: "ok"},
+		{Label: "k8s", Value: "up", State: "ok"},
+	}}}
+	s.Tiles[3].Pages = []Page{{Rows: []Row{
+		{Label: "cpu", Value: "10%", State: "ok"},
+		{Label: "ram free", Value: "60% 219M", State: "ok"},
+		{Label: "sd free", Value: "57% 8.0G", State: "ok"},
+		{Label: "temp", Value: "48C", State: "ok"},
+		{Label: "power", Value: "ok", State: "ok"},
+	}}}
+	s.Tiles[4].Pages = []Page{{Rows: []Row{
+		{Label: "scans", Value: "8", State: "ok", Value2: "5", State2: "ok"},
+		{Label: "users", Value: "1", State: "ok", Value2: "0", State2: "stale"},
+		{Label: "anon", Value: "3", State: "ok", Value2: "2", State2: "ok"},
+		{Label: "ascans", Value: "4", State: "ok", Value2: "1", State2: "ok"},
+		{Label: "7d scans", Value: "40", State: "ok", Value2: "30", State2: "ok"},
+		{Label: "7d users", Value: "9", State: "ok", Value2: "7", State2: "ok"},
+		{Label: "dev", Value: "up", State: "ok"},
+	}}}
 	return s
 }
 

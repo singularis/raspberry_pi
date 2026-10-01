@@ -142,11 +142,62 @@ def backepr():
     return out, dash, state
 
 
+# Pi health is polled off the assemble path. A slow Zero must not stall the snapshot,
+# and a few failed GETs must not turn the tile grey.
+_pi_mu = threading.Lock()
+_pi = {"body": {}, "cpu": None, "ok_at": 0.0, "read_at": 0.0, "running": False}
+_PI_OK_FOR = 300
+_PI_IDLE_STOP = 180
+
+
 def pi_health():
-    try:
-        return httpx.get(PI, timeout=4).json()
-    except Exception:
-        return {}
+    """Cached /health. Empty once the last good sample is older than 5 minutes."""
+    now = time.time()
+    with _pi_mu:
+        _pi["read_at"] = now
+        fresh = now - _pi["ok_at"] <= _PI_OK_FOR
+        body = dict(_pi["body"]) if fresh else {}
+        cpu = _pi["cpu"] if fresh else None
+        running = _pi["running"]
+        if not running:
+            _pi["running"] = True
+    if cpu is not None:
+        body["cpu"] = cpu
+    if not running:
+        threading.Thread(target=_pi_loop, daemon=True).start()
+    return body
+
+
+def _pi_loop():
+    fail = 0
+    notes = {}
+    while True:
+        with _pi_mu:
+            idle = time.time() - _pi["read_at"]
+        if idle > _PI_IDLE_STOP:
+            with _pi_mu:
+                _pi["running"] = False
+            return
+        body = None
+        try:
+            r = httpx.get(PI, timeout=10)
+            r.raise_for_status()
+            got = r.json()
+            if isinstance(got, dict) and got:
+                body = got
+        except Exception:
+            body = None
+        if body is not None:
+            cpu = pi_cpu(body.get("cpu_total"), body.get("cpu_idle"), notes)
+            with _pi_mu:
+                _pi["body"] = body
+                _pi["cpu"] = cpu
+                _pi["ok_at"] = time.time()
+            fail = 0
+            time.sleep(60)
+            continue
+        fail += 1
+        time.sleep(min(120, 5 * (2 ** (fail - 1))))
 
 
 def vllm_up():
@@ -249,46 +300,44 @@ def _get_eater(url, token):
 
 
 def eater():
+    """Prod up/down paints the tile. Dev is only the inner-screen row. Counts are SQL."""
     prod_secret = _secret("chater-ui", "chater-ui")
     dev_secret = _secret("chater-ui-dev", "chater-ui-dev")
-    out = {"prod_ok": False, "dev_ok": False, "health_ok": False, "prod_ms": None, "dishes": None, "hop": ""}
+    out = {"prod_ok": False, "dev_ok": False, "health_ok": False}
     try:
         hr = httpx.get(HEALTHZ, timeout=4)
         out["health_ok"] = hr.status_code < 500
     except Exception:
         out["health_ok"] = False
     if prod_secret:
-        ok, ms, dishes, code = _get_eater(EATER_PROD, mint(prod_secret))
-        out.update(prod_ok=ok, prod_ms=ms, dishes=dishes, hop="public " + code)
+        ok, _, _, _code = _get_eater(EATER_PROD, mint(prod_secret))
+        out["prod_ok"] = ok
         if not ok:
-            ok2, ms2, dishes2, code2 = _get_eater(EATER_PROD_HOP, mint(prod_secret))
-            out.update(prod_ok=ok2, prod_ms=ms2, dishes=dishes2, hop="chater-ui:5000 " + code2)
+            ok2, _, _, _code2 = _get_eater(EATER_PROD_HOP, mint(prod_secret))
+            out["prod_ok"] = ok2
     if dev_secret:
-        ok, _, _, code = _get_eater(EATER_DEV, mint(dev_secret))
+        ok, _, _, _code = _get_eater(EATER_DEV, mint(dev_secret))
         out["dev_ok"] = ok
         if not ok:
-            ok2, _, _, code2 = _get_eater(EATER_DEV_HOP, mint(dev_secret))
+            ok2, _, _, _code2 = _get_eater(EATER_DEV_HOP, mint(dev_secret))
             out["dev_ok"] = ok2
-            out["hop"] = (out["hop"] + " dev:" + code2).strip()
-    out["argo_bad"] = argo_bad()
-    users, scans, anon, anon_scans = eater_today()
-    out["users_today"] = users
-    out["scans_today"] = scans
-    out["anon_today"] = anon
-    out["anon_scans"] = anon_scans
-    try:
-        stats = httpx.get("http://192.168.0.113/api/stats", timeout=4).json().get("statistics") or {}
-        out["active_7d"] = stats.get("active_users_7_days")
-    except Exception:
-        out["active_7d"] = None
+    out.update(eater_counts())
     return out
 
 
-def eater_today():
-    """New registered users and dish scans for today. Read-only on the eater DB."""
+_EATER_KEYS = (
+    "scans_today", "scans_yday", "ascans_today", "ascans_yday", "scans_7d", "scans_prev7",
+    "users_today", "users_yday", "anon_today", "anon_yday", "users_7d", "users_prev7",
+)
+
+
+def eater_counts():
+    """Today, yesterday, this week, and the week before. One query, read-only."""
+    empty = {k: None for k in _EATER_KEYS}
     token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
     if not os.path.exists(token_path):
-        return None, None, None, None
+        return empty
+    anon = "anon_%@anonymous.local"
     try:
         import base64
         import psycopg2
@@ -306,19 +355,30 @@ def eater_today():
         conn = psycopg2.connect(host="eater-db.eater.svc.cluster.local", dbname="eater", user=user, password=password, connect_timeout=4)
         try:
             cur = conn.cursor()
-            cur.execute("""SELECT COUNT(*) FROM public."user" WHERE register_date::date = CURRENT_DATE AND email <> 'test@test.com' AND email NOT LIKE 'anon_%@anonymous.local'""")
-            users = cur.fetchone()[0]
-            cur.execute("""SELECT COUNT(*) FROM public."user" WHERE register_date::date = CURRENT_DATE AND email LIKE 'anon_%@anonymous.local'""")
-            anon = cur.fetchone()[0]
-            cur.execute("""SELECT COUNT(*) FROM dishes_day WHERE date = CURRENT_DATE AND user_email <> 'test@test.com'""")
-            scans = cur.fetchone()[0]
-            cur.execute("""SELECT COUNT(*) FROM dishes_day WHERE date = CURRENT_DATE AND user_email LIKE 'anon_%@anonymous.local'""")
-            anon_scans = cur.fetchone()[0]
-            return int(users), int(scans), int(anon), int(anon_scans)
+            cur.execute(
+                """
+                SELECT
+                  (SELECT COUNT(*) FROM dishes_day WHERE date = CURRENT_DATE AND user_email <> 'test@test.com'),
+                  (SELECT COUNT(*) FROM dishes_day WHERE date = CURRENT_DATE - 1 AND user_email <> 'test@test.com'),
+                  (SELECT COUNT(*) FROM dishes_day WHERE date = CURRENT_DATE AND user_email LIKE %s),
+                  (SELECT COUNT(*) FROM dishes_day WHERE date = CURRENT_DATE - 1 AND user_email LIKE %s),
+                  (SELECT COUNT(*) FROM dishes_day WHERE date >= CURRENT_DATE - 6 AND user_email <> 'test@test.com'),
+                  (SELECT COUNT(*) FROM dishes_day WHERE date >= CURRENT_DATE - 13 AND date < CURRENT_DATE - 6 AND user_email <> 'test@test.com'),
+                  (SELECT COUNT(*) FROM public."user" WHERE register_date::date = CURRENT_DATE AND email <> 'test@test.com' AND email NOT LIKE %s),
+                  (SELECT COUNT(*) FROM public."user" WHERE register_date::date = CURRENT_DATE - 1 AND email <> 'test@test.com' AND email NOT LIKE %s),
+                  (SELECT COUNT(*) FROM public."user" WHERE register_date::date = CURRENT_DATE AND email LIKE %s),
+                  (SELECT COUNT(*) FROM public."user" WHERE register_date::date = CURRENT_DATE - 1 AND email LIKE %s),
+                  (SELECT COUNT(*) FROM public."user" WHERE register_date::date >= CURRENT_DATE - 6 AND email <> 'test@test.com'),
+                  (SELECT COUNT(*) FROM public."user" WHERE register_date::date >= CURRENT_DATE - 13 AND register_date::date < CURRENT_DATE - 6 AND email <> 'test@test.com')
+                """,
+                (anon, anon, anon, anon, anon, anon),
+            )
+            row = cur.fetchone()
+            return {k: int(row[i]) for i, k in enumerate(_EATER_KEYS)}
         finally:
             conn.close()
     except Exception:
-        return None, None, None, None
+        return empty
 
 
 def google_times():
@@ -375,10 +435,12 @@ def assemble():
     nodes, dash, state = backepr()
     for key, src in (("racoon", rac), ("racoon-worker", wrk), ("racoon-gpu", gpu_m)):
         info = ready.get(key) or {}
+        if "ready" in info:
+            src["k8s"] = bool(info["ready"])
         src["ready"] = info.get("ready", src.get("ready", True))
         if info.get("pressure"):
             src["pressure"] = True
-        b = nodes.get(key) or nodes.get(key.replace("racoon-worker", "racoon-worker")) or {}
+        b = nodes.get(key) or {}
         if b and not b.get("reachable", True):
             src["ready"] = False
     gpu_node = nodes.get("racoon-gpu") or {}
@@ -388,11 +450,15 @@ def assemble():
     claw_lines, claw_ok = [], None
     gpu_temp = gpu_m.get("temp") if on else None
     gpu_watts = None
+    gpu_load = vram_free = vram_total = None
     if on:
         claw_lines, claw_ok, extra = openclaw_report()
         if extra.get("temp") is not None:
             gpu_temp = extra["temp"]
         gpu_watts = extra.get("watts")
+        gpu_load = extra.get("load")
+        vram_free = extra.get("vram_free_mb")
+        vram_total = extra.get("vram_total_mb")
     notes = _notes()
     spark = list(notes.get("worker") or [])
     if wrk.get("free_gb") is not None:
@@ -433,12 +499,13 @@ def assemble():
     _, dns_ok = tcp_ms("192.168.0.91", 53)
     google_ms, dns_ms = google_times()
     _, internet = tcp_ms("1.1.1.1", 443)
-    staging = storage_body("staging")
-    archive = storage_body("archive")
+    # Backepr storage waits on disks that live on the GPU host. Skip it while that host is off.
+    staging = storage_body("staging") if on else {}
+    archive = storage_body("archive") if on else {}
     hole = pihole()
     down_mbps, up_mbps = speedtest(notes)
-    pi["cpu"] = pi_cpu(pi.get("cpu_total"), pi.get("cpu_idle"), notes)
     _save_notes(notes)
+    gpu_root = next((d for d in (gpu_m.get("disks") or []) if d.get("name") == "root"), {})
     return {
         "nodes": {
             "racoon": rac,
@@ -455,7 +522,15 @@ def assemble():
             "free_gb": gpu_m.get("free_gb"),
             "cpu_temp": gpu_m.get("temp"),
             "watts": gpu_watts,
-            "extra_disks": _extra_disks(rac),
+            "load": gpu_load,
+            "vram_free_mb": vram_free,
+            "vram_total_mb": vram_total,
+            "root_pct": gpu_root.get("pct"),
+            "root_free_gb": gpu_root.get("free_gb"),
+            "staging_used_pct": staging.get("percent_used") if staging.get("mounted") else None,
+            "staging_free_gb": _gib(staging.get("free_bytes")) if staging.get("mounted") else None,
+            "staging_mounted": bool(staging.get("mounted")),
+            "k8s": gpu_m.get("k8s"),
             "claw_ok": claw_ok,
             "claw_lines": claw_lines,
             "off_since": None if on else "schedule",
@@ -479,11 +554,13 @@ def assemble():
             "capacity_bad": storage.get("capacity_ok") is False,
             "smart_bad": smart_bad(),
             "running": bool(state.get("backup_running")),
+            "gpu_on": on,
             "age_d": age_d,
             "next": _short(dash.get("tiers")),
             "archive": "ok" if storage.get("capacity_ok", True) else "low",
-            "staging_free_gb": _gib(staging.get("free_bytes")),
-            "staging_used_pct": staging.get("percent_used"),
+            "staging_free_gb": _gib(staging.get("free_bytes")) if staging.get("mounted") else None,
+            "staging_used_pct": staging.get("percent_used") if staging.get("mounted") else None,
+            "staging_mounted": bool(staging.get("mounted")),
             "archive_free_gb": _gib(archive.get("free_bytes")),
             "archive_used_pct": archive.get("percent_used"),
             "archive_mounted": bool(archive.get("mounted")),
@@ -508,21 +585,8 @@ def assemble():
             "file": cam.get("file"),
             "sd": (str(pi.get("sd_free_mb")) + "M") if pi.get("sd_free_mb") is not None else None,
         },
+        "temp_out": weather(),
     }
-
-
-def _extra_disks(rac):
-    staging = storage_body("staging")
-    archive = storage_body("archive")
-    disks = [
-        {"name": "staging", "pct": staging.get("percent_used") if staging.get("mounted") else None, "free_gb": _gib(staging.get("free_bytes")) if staging.get("mounted") else None},
-        {"name": "archive", "pct": archive.get("percent_used") if archive.get("mounted") else None, "free_gb": _gib(archive.get("free_bytes")) if archive.get("mounted") else None},
-        {"name": "proxmox", "pct": None, "free_gb": None},
-    ]
-    for d in rac.get("disks") or []:
-        if d.get("name") == "root":
-            disks.append({"name": "racoon", "pct": d.get("pct"), "free_gb": d.get("free_gb")})
-    return disks
 
 
 def storage_body(kind):
@@ -662,30 +726,36 @@ def _short(tiers):
     return ""
 
 
-def argo_bad():
-    """Warn when a Chater or Eater Argo app is degraded. Same objects Argo already tracks."""
-    token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-    if not os.path.exists(token_path):
-        return False
+_wx_mu = threading.Lock()
+_wx = {"c": None, "at": 0.0}
+
+
+def weather():
+    """London air temperature. Cached 15 minutes. A failed fetch keeps the last value."""
+    now = time.time()
+    with _wx_mu:
+        if _wx["c"] is not None and now - _wx["at"] < 900:
+            return _wx["c"]
     try:
-        token = open(token_path).read()
         r = httpx.get(
-            "https://kubernetes.default.svc/apis/argoproj.io/v1alpha1/namespaces/argocd/applications",
-            headers={"Authorization": "Bearer " + token},
-            verify="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
-            timeout=4,
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": 51.5072,
+                "longitude": -0.1276,
+                "current": "temperature_2m",
+                "timezone": "Europe/London",
+            },
+            timeout=8,
         )
         r.raise_for_status()
-        for item in r.json().get("items", []):
-            name = item.get("metadata", {}).get("name", "")
-            if "eater" not in name and "chater" not in name:
-                continue
-            health = ((item.get("status") or {}).get("health") or {}).get("status")
-            if health not in (None, "Healthy"):
-                return True
-        return False
+        c = float(r.json()["current"]["temperature_2m"])
     except Exception:
-        return False
+        with _wx_mu:
+            return _wx["c"]
+    with _wx_mu:
+        _wx["c"] = c
+        _wx["at"] = now
+    return c
 
 
 def smart_bad():
@@ -755,7 +825,7 @@ def openclaw_report():
             ["ssh", "-i", key, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
              "-o", "UserKnownHostsFile=/tmp/known_hosts", "-o", "ConnectTimeout=5",
              "dante@192.168.1.5",
-             "openclaw health --json; echo '---SPLIT---'; openclaw status --json; echo '---SPLIT---'; nvidia-smi --query-gpu=temperature.gpu,power.draw --format=csv,noheader,nounits"],
+             "openclaw health --json; echo '---SPLIT---'; openclaw status --json; echo '---SPLIT---'; nvidia-smi --query-gpu=temperature.gpu,power.draw,utilization.gpu,memory.free,memory.total --format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=20,
         )
     except Exception:
@@ -776,14 +846,19 @@ def openclaw_report():
             status = None
     extra = {}
     if len(parts) > 2:
-        bits = parts[2].strip().split(",")
-        if bits and bits[0].strip().replace(".", "", 1).isdigit():
-            extra["temp"] = float(bits[0])
-        if len(bits) > 1:
+        bits = [b.strip().split()[0] for b in parts[2].strip().split(",") if b.strip()]
+
+        def _num(i):
             try:
-                extra["watts"] = float(bits[1].strip().split()[0])
-            except ValueError:
-                pass
+                return float(bits[i])
+            except (IndexError, ValueError):
+                return None
+
+        extra["temp"] = _num(0)
+        extra["watts"] = _num(1)
+        extra["load"] = _num(2)
+        extra["vram_free_mb"] = _num(3)
+        extra["vram_total_mb"] = _num(4)
     lines, ok = claw_lines(health, status)
     return lines, ok, extra
 
@@ -792,8 +867,10 @@ def fire(action):
     path = {"wake": "/api/actions/wol", "backup": "/api/actions/sync"}.get(action)
     if not path:
         return False
+    # WoL blocks inside Backepr until the host boots. The caller already runs this in a thread.
+    timeout = 600 if action == "wake" else 30
     try:
-        httpx.post(BACKEPR + path, timeout=2)
+        httpx.post(BACKEPR + path, timeout=timeout)
         return True
     except Exception:
         return True

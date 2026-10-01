@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -23,9 +25,22 @@ const (
 	idleBack    = 5 * time.Second
 	nightWake   = 60 * time.Second
 	calibAbort  = 15 * time.Second
-	missesBang  = 6
+	linkDead    = 5 * time.Minute
+	staleAfter  = 90 * time.Second
+	camEvery    = 30 * time.Minute
 	schemaKnown = 1
 )
+
+// imxPresent is the local camera check. It looks at the driver, not the collector.
+var imxPresent = func() bool {
+	matches, _ := filepath.Glob("/sys/bus/i2c/drivers/imx519/*-001a")
+	for _, m := range matches {
+		if strings.HasSuffix(filepath.Base(m), "-001a") {
+			return true
+		}
+	}
+	return false
+}
 
 type App struct {
 	F      *faces
@@ -68,6 +83,12 @@ type App struct {
 	RecAt              time.Duration
 	view               string
 	boxes              []inkBox
+
+	ActionURL string
+	Post      func(id string)
+	Notes     chan string
+	CamOK     bool
+	CamAt     time.Duration
 }
 
 func newApp(now time.Time) *App {
@@ -78,6 +99,7 @@ func newApp(now time.Time) *App {
 		Now:       now,
 		NightFrom: 23,
 		NightTo:   7,
+		Notes:     make(chan string, 4),
 	}
 	a.paint()
 	return a
@@ -95,6 +117,8 @@ func (a *App) advance(dt time.Duration) {
 		a.Started = a.Mono
 		a.IdleAt = a.Mono
 	}
+	a.drainNotes()
+	a.refreshCam()
 	a.ThemeNight = a.inNight() && a.Mono > a.WakeUntil
 	if a.ThemeNight && a.Screen == scrHome && !a.Locked {
 		a.Screen = scrNight
@@ -129,9 +153,45 @@ func (a *App) viewSig() string {
 	if a.Screen == scrCamera {
 		tick = fmt.Sprint(a.camElapsed())
 	}
-	return fmt.Sprintf("%s|%d|%d|%s|%v|%v|%v|%s|%s|%d|%v|%s",
+	stale := "0"
+	if a.LastOK > 0 && a.Mono-a.LastOK >= staleAfter {
+		stale = "1"
+	}
+	return fmt.Sprintf("%s|%d|%d|%s|%v|%v|%v|%s|%s|%d|%v|%s|%s|%v",
 		a.Screen, a.Tile, a.Page, a.Toast, a.Down, a.ThemeNight, a.Locked,
-		a.Now.Format("15:04"), ts, a.CalStep, a.Press, tick)
+		a.Now.Format("15:04"), ts, a.CalStep, a.Press, tick, stale, a.CamOK)
+}
+
+func (a *App) drainNotes() {
+	for {
+		select {
+		case s := <-a.Notes:
+			a.toast(s)
+		default:
+			return
+		}
+	}
+}
+
+func (a *App) refreshCam() {
+	if a.CamAt != 0 && a.Mono-a.CamAt < camEvery {
+		return
+	}
+	a.CamOK = imxPresent()
+	a.CamAt = a.Mono
+	if a.CamAt == 0 {
+		a.CamAt = time.Nanosecond
+	}
+}
+
+func (a *App) linkDown() bool {
+	if a.LastOK > 0 {
+		return a.Mono-a.LastOK >= linkDead
+	}
+	if a.Started == 0 {
+		return false
+	}
+	return a.Mono-a.Started >= linkDead
 }
 
 func (a *App) inNight() bool {
@@ -155,10 +215,8 @@ func (a *App) goHome() {
 func (a *App) setSnap(s *Snapshot, err error) {
 	if err != nil || s == nil {
 		a.Fails++
-		if a.Fails >= missesBang && a.Mono-a.Started >= bootGrace {
-			if a.Screen != scrCamera && a.Screen != scrCalib {
-				a.Screen = scrBang
-			}
+		if a.linkDown() && a.Screen != scrCamera && a.Screen != scrCalib {
+			a.Screen = scrBang
 		}
 		a.paint()
 		return
@@ -377,9 +435,16 @@ func (a *App) confirmTap(id string) {
 		if a.Mono < a.ArmedAt {
 			return
 		}
+		id := ""
+		if a.Action != nil {
+			id = a.Action.ID
+		}
 		a.toast("Sending...")
 		a.Action = nil
 		a.Screen = scrDetail
+		if id != "" && a.Post != nil {
+			go a.Post(id)
+		}
 	}
 }
 

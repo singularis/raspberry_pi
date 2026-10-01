@@ -25,7 +25,8 @@ def refresh():
     if not leader():
         return
     try:
-        built = snap(build(assemble()))
+        facts = assemble()
+        built = snap(build(facts), temp_out=facts.get("temp_out"))
     except Exception as exc:
         built = _cache.get("snap")
         print("refresh failed", type(exc).__name__)

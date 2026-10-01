@@ -2,6 +2,7 @@
   "schema": 1,
   "ts": "2026-09-26T15:43:00+01:00",
   "next_in_s": 58,
+  "temp_out": "16°C",
   "summary": {
     "warn": 1,
     "crit": 0,
@@ -26,35 +27,74 @@
       ],
       "pages": [
         {
-          "chart": {
-            "label": "cpu",
-            "points": [
-              30,
-              33,
-              37
-            ]
-          },
           "rows": [
-            [
-              "cpu",
-              "37%"
-            ],
-            [
-              "ram",
-              "41%"
-            ]
+            {
+              "Label": "cpu",
+              "Value": "37%",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "ram free",
+              "Value": "63% 40G",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "/ free",
+              "Value": "34% 117G",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "ssd free",
+              "Value": "48% 461G",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "hdd free",
+              "Value": "26% 480G",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "temp",
+              "Value": "56C",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "k8s",
+              "Value": "up",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            }
           ]
         },
         {
           "rows": [
-            [
-              "nodes",
-              "2/3"
-            ],
-            [
-              "pods",
-              "ok"
-            ]
+            {
+              "Label": "nodes",
+              "Value": "2/3",
+              "State": "",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "pods",
+              "Value": "ok",
+              "State": "",
+              "Value2": "",
+              "State2": ""
+            }
           ]
         }
       ]
@@ -76,24 +116,42 @@
       ],
       "pages": [
         {
-          "chart": {
-            "label": "ram free",
-            "points": [
-              2,
-              1.8,
-              1.6
-            ],
-            "line": 1
-          },
           "rows": [
-            [
-              "ram free",
-              "1.8G"
-            ],
-            [
-              "cpu",
-              "23%"
-            ]
+            {
+              "Label": "cpu",
+              "Value": "23%",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "ram free",
+              "Value": "27% 1.9G",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "/ free",
+              "Value": "41% 49G",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "temp",
+              "Value": "52C",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "k8s",
+              "Value": "up",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            }
           ]
         }
       ]
@@ -110,25 +168,68 @@
       "pages": [
         {
           "rows": [
-            [
-              "state",
-              "off (scheduled)"
-            ],
-            [
-              "on",
-              "08:00"
-            ]
-          ],
-          "actions": [
             {
-              "id": "gpu_wake",
-              "label": "Wake GPU",
-              "enabled": true,
-              "confirm": {
-                "title": "Wake GPU host?",
-                "body": "Boots Proxmox and racoon-gpu",
-                "verb": "Wake"
-              }
+              "Label": "cpu",
+              "Value": "off",
+              "State": "off",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "ram free",
+              "Value": "off",
+              "State": "off",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "gpu",
+              "Value": "off",
+              "State": "off",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "gpu ram",
+              "Value": "off",
+              "State": "off",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "staging free",
+              "Value": "off",
+              "State": "off",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "/ free",
+              "Value": "off",
+              "State": "off",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "temp",
+              "Value": "off",
+              "State": "off",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "gpu temp",
+              "Value": "off",
+              "State": "off",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "k8s",
+              "Value": "off",
+              "State": "off",
+              "Value2": "",
+              "State2": ""
             }
           ]
         }
@@ -151,14 +252,41 @@
       "pages": [
         {
           "rows": [
-            [
-              "state",
-              "ok"
-            ],
-            [
-              "value",
-              "48C"
-            ]
+            {
+              "Label": "cpu",
+              "Value": "10%",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "ram free",
+              "Value": "60% 219M",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "sd free",
+              "Value": "57% 8.0G",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "temp",
+              "Value": "48C",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "power",
+              "Value": "ok",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            }
           ]
         }
       ]
@@ -180,26 +308,55 @@
       "pages": [
         {
           "rows": [
-            [
-              "synth prod",
-              "420ms"
-            ],
-            [
-              "synth dev",
-              "ok"
-            ]
-          ]
-        },
-        {
-          "rows": [
-            [
-              "dishes",
-              "+23"
-            ],
-            [
-              "users 7d",
-              "57"
-            ]
+            {
+              "Label": "scans",
+              "Value": "8",
+              "State": "ok",
+              "Value2": "5",
+              "State2": "ok"
+            },
+            {
+              "Label": "users",
+              "Value": "1",
+              "State": "ok",
+              "Value2": "0",
+              "State2": "stale"
+            },
+            {
+              "Label": "anon",
+              "Value": "3",
+              "State": "ok",
+              "Value2": "2",
+              "State2": "ok"
+            },
+            {
+              "Label": "ascans",
+              "Value": "4",
+              "State": "ok",
+              "Value2": "1",
+              "State2": "ok"
+            },
+            {
+              "Label": "7d scans",
+              "Value": "40",
+              "State": "ok",
+              "Value2": "30",
+              "State2": "ok"
+            },
+            {
+              "Label": "7d users",
+              "Value": "9",
+              "State": "ok",
+              "Value2": "7",
+              "State2": "ok"
+            },
+            {
+              "Label": "dev",
+              "Value": "up",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            }
           ]
         }
       ]
@@ -216,37 +373,48 @@
       "pages": [
         {
           "rows": [
-            [
-              "last",
-              "ok"
-            ],
-            [
-              "next",
-              "3d"
-            ]
+            {
+              "Label": "staging free",
+              "Value": "off",
+              "State": "off",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "archive",
+              "Value": "off",
+              "State": "off",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "last",
+              "Value": "4d",
+              "State": "ok",
+              "Value2": "",
+              "State2": ""
+            }
           ],
           "actions": [
             {
-              "id": "backup_run",
+              "id": "wake",
+              "label": "Wake GPU",
+              "enabled": true,
+              "confirm": {
+                "title": "Wake GPU host?",
+                "body": "Boots Proxmox and racoon-gpu",
+                "verb": "Wake"
+              }
+            },
+            {
+              "id": "backup",
               "label": "Run backup",
               "enabled": true,
               "confirm": {
-                "title": "Run full backup?",
-                "body": "Wakes GPU, powers 12 TB, rsync + restic",
+                "title": "Run backup now?",
+                "body": "Starts the staging sync",
                 "verb": "Run"
               }
-            }
-          ]
-        },
-        {
-          "bars": [
-            {
-              "label": "staging",
-              "pct": 40
-            },
-            {
-              "label": "archive",
-              "pct": 61
             }
           ]
         }
@@ -270,14 +438,20 @@
       "pages": [
         {
           "rows": [
-            [
-              "state",
-              "ok"
-            ],
-            [
-              "value",
-              "12ms"
-            ]
+            {
+              "Label": "state",
+              "Value": "ok",
+              "State": "",
+              "Value2": "",
+              "State2": ""
+            },
+            {
+              "Label": "value",
+              "Value": "12ms",
+              "State": "",
+              "Value2": "",
+              "State2": ""
+            }
           ]
         }
       ]
