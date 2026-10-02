@@ -2,7 +2,7 @@
 html,body{height:100%;background:#111;color:#eee;font:16px sans-serif;touch-action:manipulation}
 button,a.btn{border:0;border-radius:10px;background:#333;color:#fff;text-decoration:none;display:flex;align-items:center;justify-content:center}
 #wrap{position:relative;width:100%;height:calc(100% - 72px);background:#000;overflow:hidden;container-type:size}
-#v,#p{position:absolute;left:50%;top:50%;width:min(100cqh,calc(100cqw * 4 / 3));height:min(100cqw,calc(100cqh * 3 / 4));object-fit:fill;background:#000;transform:translate(-50%,-50%) rotate(-90deg)}
+#v,#p{position:absolute;left:50%;top:50%;width:min(100cqh,calc(100cqw * 4 / 3));height:min(100cqw,calc(100cqh * 3 / 4));object-fit:fill;background:#000;transform:translate(-50%,-50%) rotate(90deg)}
 #banner{display:none;position:absolute;inset:0;align-items:center;justify-content:center;font:700 28px sans-serif;color:#fff;background:#500}
 #banner.show{display:flex}
 #bar{height:72px;display:flex;align-items:center;justify-content:center;gap:8px}

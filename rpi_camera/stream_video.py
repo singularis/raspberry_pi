@@ -446,18 +446,31 @@ def _cpu_jiff(which):
     return None
 
 
+_rssi_mono = 0.0
+_rssi_val = None
+_RSSI_EVERY = 600  # reading this asks the Zero W firmware; that command stalls the chip
+
+
 def _rssi():
+    global _rssi_mono, _rssi_val
+    now = time.monotonic()
+    if _rssi_mono and now - _rssi_mono < _RSSI_EVERY:
+        return _rssi_val
+    _rssi_mono = now
     text = _read("/proc/net/wireless") or ""
+    val = None
     for line in text.splitlines():
         if "wlan" not in line:
             continue
         parts = line.replace(".", " ").split()
         if len(parts) >= 4:
             try:
-                return int(float(parts[3]))
+                val = int(float(parts[3]))
             except ValueError:
-                return None
-    return None
+                val = None
+            break
+    _rssi_val = val
+    return val
 
 
 def _units(names):
