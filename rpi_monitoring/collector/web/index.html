@@ -4,29 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LCD monitor</title>
-<link rel="stylesheet" href="/static/style.css?v=4">
+<link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
 <main class="page">
   <p class="mark">LCD monitor</p>
   <h1 id="status">loading</h1>
   <p id="temp" class="weather"></p>
-  <nav id="grid" class="list"></nav>
-  <section id="detail" hidden>
-    <button id="back" type="button">Back</button>
-    <h2 id="title"></h2>
-    <div id="rows"></div>
-    <div id="actions"></div>
-  </section>
-  <p id="note"></p>
+  <div id="sections"></div>
 </main>
 <script>
-const grid = document.getElementById("grid");
-const detail = document.getElementById("detail");
-const rowsEl = document.getElementById("rows");
-const actionsEl = document.getElementById("actions");
+const sections = document.getElementById("sections");
 let snap = null;
-let openId = null;
 
 function summary(s) {
   const n = s.summary || {};
@@ -35,49 +24,7 @@ function summary(s) {
   return "all ok";
 }
 
-function paint() {
-  if (!snap) return;
-  const st = document.getElementById("status");
-  st.textContent = summary(snap);
-  st.className = (snap.summary && snap.summary.crit) ? "crit" : (snap.summary && snap.summary.warn) ? "warn" : "ok";
-  const bits = [];
-  if (snap.temp_out) bits.push(snap.temp_out);
-  if (snap.humidity) bits.push(snap.humidity);
-  if (snap.pressure) bits.push(snap.pressure + " hPa");
-  document.getElementById("temp").textContent = bits.join("   ");
-  grid.innerHTML = "";
-  (snap.tiles || []).forEach(function (t) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "tile " + (t.state || "off");
-    const left = document.createElement("span");
-    left.className = "left";
-    const name = document.createElement("span");
-    name.className = "name";
-    name.textContent = t.label || "";
-    left.appendChild(name);
-    if (t.cap) {
-      const cap = document.createElement("span");
-      cap.className = "cap";
-      cap.textContent = t.cap;
-      left.appendChild(cap);
-    }
-    const big = document.createElement("span");
-    big.className = "big";
-    big.textContent = t.big || "--";
-    b.appendChild(left);
-    b.appendChild(big);
-    b.onclick = function () { openId = t.id; show(); };
-    grid.appendChild(b);
-  });
-  if (openId) show();
-}
-
-function tileById(id) {
-  return (snap.tiles || []).find(function (t) { return t.id === id; });
-}
-
-function addRows(rows) {
+function addRows(parent, rows) {
   const dual = rows.some(function (r) { return r.length > 3; });
   if (dual) {
     const h = document.createElement("div");
@@ -90,7 +37,7 @@ function addRows(rows) {
     h.appendChild(a);
     h.appendChild(b);
     h.appendChild(c);
-    rowsEl.appendChild(h);
+    parent.appendChild(h);
   }
   rows.forEach(function (r) {
     const d = document.createElement("div");
@@ -108,52 +55,94 @@ function addRows(rows) {
       c.className = r[4] || "";
       d.appendChild(c);
     }
-    rowsEl.appendChild(d);
+    parent.appendChild(d);
   });
 }
 
-function show() {
-  const t = tileById(openId);
-  if (!t) { detail.hidden = true; grid.hidden = false; return; }
-  grid.hidden = true;
-  detail.hidden = false;
-  document.getElementById("title").textContent = t.label || "";
-  rowsEl.innerHTML = "";
-  const pages = t.pages || [];
-  pages.forEach(function (page) {
-    addRows(page.rows || []);
-  });
-  actionsEl.innerHTML = "";
-  pages.forEach(function (page) {
-    (page.actions || []).forEach(function (act) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = act.label;
-      b.disabled = !act.enabled;
-      b.onclick = function () { run(act); };
-      actionsEl.appendChild(b);
+function paint() {
+  if (!snap) return;
+  const y = window.scrollY;
+  const st = document.getElementById("status");
+  st.textContent = summary(snap);
+  st.className = (snap.summary && snap.summary.crit) ? "crit" : (snap.summary && snap.summary.warn) ? "warn" : "ok";
+  const bits = [];
+  if (snap.temp_out) bits.push(snap.temp_out);
+  if (snap.humidity) bits.push(snap.humidity);
+  if (snap.pressure) bits.push(snap.pressure + " hPa");
+  document.getElementById("temp").textContent = bits.join("   ");
+  sections.innerHTML = "";
+  (snap.tiles || []).forEach(function (t) {
+    const sec = document.createElement("section");
+    sec.className = "block " + (t.state || "off");
+    const head = document.createElement("header");
+    const h = document.createElement("h2");
+    h.textContent = t.label || "";
+    const big = document.createElement("p");
+    big.className = "big";
+    big.textContent = t.big || "--";
+    head.appendChild(h);
+    head.appendChild(big);
+    sec.appendChild(head);
+    if (t.cap) {
+      const cap = document.createElement("p");
+      cap.className = "cap";
+      cap.textContent = t.cap;
+      sec.appendChild(cap);
+    }
+    const rows = document.createElement("div");
+    rows.className = "rows";
+    (t.pages || []).forEach(function (page) {
+      addRows(rows, page.rows || []);
     });
+    if (t.camera) {
+      const rec = !!t.camera.recording;
+      const camRows = [
+        ["recording", rec ? "yes" : "no", rec ? "busy" : "ok"],
+        ["phase", t.camera.phase || "idle", "ok"]
+      ];
+      if (rec) {
+        const s = t.camera.elapsed_s || 0;
+        const mm = String(Math.floor(s / 60)).padStart(2, "0");
+        const ss = String(s % 60).padStart(2, "0");
+        camRows.push(["time", mm + ":" + ss, "busy"]);
+      }
+      addRows(rows, camRows);
+    }
+    sec.appendChild(rows);
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const note = document.createElement("p");
+    note.className = "note";
+    (t.pages || []).forEach(function (page) {
+      (page.actions || []).forEach(function (act) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = act.label;
+        b.disabled = !act.enabled;
+        b.onclick = function () { run(act, note); };
+        actions.appendChild(b);
+      });
+    });
+    if (actions.childElementCount) {
+      sec.appendChild(actions);
+      sec.appendChild(note);
+    }
+    sections.appendChild(sec);
   });
+  window.scrollTo(0, y);
 }
 
-async function run(act) {
+async function run(act, note) {
   const title = (act.confirm && act.confirm.title) || act.label;
   if (!window.confirm(title)) return;
-  document.getElementById("note").textContent = "sending";
+  note.textContent = "sending";
   const r = await fetch("/api/actions", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({id: act.id})
   });
-  document.getElementById("note").textContent = r.ok ? (act.id === "wake" ? "magic packet sent" : "sent") : "failed";
+  note.textContent = r.ok ? (act.id === "wake" ? "magic packet sent" : "sent") : "failed";
 }
-
-document.getElementById("back").onclick = function () {
-  openId = null;
-  detail.hidden = true;
-  grid.hidden = false;
-  document.getElementById("note").textContent = "";
-};
 
 async function load() {
   try {
