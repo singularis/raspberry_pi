@@ -126,5 +126,7 @@ h1.crit { color: var(--crit); }
   .page { width: min(1360px, calc(100% - 20px)); }
   .top { flex-wrap: wrap; }
   .weather { margin-left: 0; }
+}
+@media (max-width: 360px) {
   #sections { grid-template-columns: 1fr; }
 }
