@@ -459,6 +459,7 @@ def assemble():
         gpu_load = extra.get("load")
         vram_free = extra.get("vram_free_mb")
         vram_total = extra.get("vram_total_mb")
+    cpu_temp = proxmox_cpu_c() if on else None
     notes = _notes()
     spark = list(notes.get("worker") or [])
     if wrk.get("free_gb") is not None:
@@ -520,7 +521,7 @@ def assemble():
             "cpu": gpu_m.get("cpu"),
             "ram_pct": gpu_m.get("ram_pct"),
             "free_gb": gpu_m.get("free_gb"),
-            "cpu_temp": gpu_m.get("temp"),
+            "cpu_temp": cpu_temp,
             "watts": gpu_watts,
             "load": gpu_load,
             "vram_free_mb": vram_free,
@@ -724,6 +725,42 @@ def _short(tiers):
         if t.get("name") == "staging" and t.get("next_run"):
             return "next " + t["next_run"][5:16].replace("T", " ")
     return ""
+
+
+def proxmox_cpu_c():
+    """Package temperature of the Proxmox host. The GPU VM has no coretemp sensor."""
+    key = _gpu_key()
+    if not key:
+        return None
+    script = (
+        "import os\n"
+        "base='/sys/class/hwmon'\n"
+        "for name in os.listdir(base):\n"
+        " p=os.path.join(base, name)\n"
+        " try:\n"
+        "  if open(os.path.join(p,'name')).read().strip()!='coretemp':\n"
+        "   continue\n"
+        "  print(int(open(os.path.join(p,'temp1_input')).read())/1000)\n"
+        "  break\n"
+        " except Exception:\n"
+        "  pass\n"
+    )
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["ssh", "-i", key, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+             "-o", "UserKnownHostsFile=/tmp/known_hosts", "-o", "ConnectTimeout=5",
+             "root@192.168.0.12", "python3", "-"],
+            input=script, capture_output=True, text=True, timeout=8,
+        )
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        return float((r.stdout or "").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
 
 
 _wx_mu = threading.Lock()

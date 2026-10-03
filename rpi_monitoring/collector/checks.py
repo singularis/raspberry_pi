@@ -165,7 +165,7 @@ def _gpu_tile(gpu):
     watt_s = "" if watts is None else " " + str(int(round(watts))) + "W"
     if not on:
         big, l2 = "OFF", "since " + (gpu.get("off_since") or "--")
-        rows = _off("cpu", "ram free", "gpu", "gpu ram", "staging free", "/ free", "temp", "gpu temp", "k8s")
+        rows = _off("cpu", "ram free", "gpu", "gpu ram", "staging free", "/ free", "cpu temp", "gpu temp", "k8s")
         pages = [{"rows": rows}]
     else:
         big, l2 = _temp(gpu.get("temp")), "vllm " + ("up" if gpu.get("vllm") else "down") + watt_s
@@ -182,7 +182,7 @@ def _gpu_tile(gpu):
         else:
             rows.append(_row("staging free", "off", "off"))
         rows.append(_disk_row("root", gpu.get("root_pct"), gpu.get("root_free_gb")))
-        rows.append(_temp_row("temp", node.get("temp"), 75, 85))
+        rows.append(_temp_row("cpu temp", node.get("temp"), 75, 85))
         rows.append(_temp_row("gpu temp", gpu.get("temp"), 83, 90))
         rows.append(_k8s_row(node))
         pages = [{"rows": rows}]
