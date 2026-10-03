@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 
 
-def snap(tiles, next_in_s=60, temp_out=None):
+def snap(tiles, next_in_s=60, temp_out=None, weather=None):
     warn = sum(1 for t in tiles if t["state"] == "warn")
     crit = sum(1 for t in tiles if t["state"] == "crit")
     worst = ""
@@ -23,8 +23,14 @@ def snap(tiles, next_in_s=60, temp_out=None):
         "summary": {"warn": warn, "crit": crit, "worst": worst},
         "tiles": tiles,
     }
-    if temp_out is not None:
-        body["temp_out"] = str(int(round(float(temp_out)))) + "\u00b0C"
+    w = weather or {}
+    temp = w.get("temp", temp_out)
+    if temp is not None:
+        body["temp_out"] = str(int(round(float(temp)))) + "\u00b0C"
+    if w.get("hum") is not None:
+        body["humidity"] = str(int(round(float(w["hum"])))) + "%"
+    if w.get("press") is not None:
+        body["pressure"] = str(int(round(float(w["press"]))))
     return body
 
 

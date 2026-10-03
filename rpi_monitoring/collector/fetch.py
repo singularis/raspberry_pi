@@ -586,7 +586,7 @@ def assemble():
             "file": cam.get("file"),
             "sd": (str(pi.get("sd_free_mb")) + "M") if pi.get("sd_free_mb") is not None else None,
         },
-        "temp_out": weather(),
+        "weather": weather(),
     }
 
 
@@ -764,35 +764,40 @@ def proxmox_cpu_c():
 
 
 _wx_mu = threading.Lock()
-_wx = {"c": None, "at": 0.0}
+_wx = {"data": None, "at": 0.0}
 
 
 def weather():
-    """London air temperature. Cached 15 minutes. A failed fetch keeps the last value."""
+    """London temperature, humidity, and pressure. Cached 15 minutes."""
     now = time.time()
     with _wx_mu:
-        if _wx["c"] is not None and now - _wx["at"] < 900:
-            return _wx["c"]
+        if _wx["data"] and now - _wx["at"] < 900:
+            return _wx["data"]
     try:
         r = httpx.get(
             "https://api.open-meteo.com/v1/forecast",
             params={
                 "latitude": 51.5072,
                 "longitude": -0.1276,
-                "current": "temperature_2m",
+                "current": "temperature_2m,relative_humidity_2m,surface_pressure",
                 "timezone": "Europe/London",
             },
             timeout=8,
         )
         r.raise_for_status()
-        c = float(r.json()["current"]["temperature_2m"])
+        cur = r.json()["current"]
+        data = {
+            "temp": float(cur["temperature_2m"]),
+            "hum": float(cur["relative_humidity_2m"]),
+            "press": float(cur["surface_pressure"]),
+        }
     except Exception:
         with _wx_mu:
-            return _wx["c"]
+            return _wx["data"]
     with _wx_mu:
-        _wx["c"] = c
+        _wx["data"] = data
         _wx["at"] = now
-    return c
+    return data
 
 
 def smart_bad():
