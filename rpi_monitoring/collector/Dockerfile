@@ -7,6 +7,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && pip install --no-cache-dir -r requirements.txt
 COPY *.py ./
+COPY web/ ./web/
 USER 65534
 EXPOSE 8010
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8010"]

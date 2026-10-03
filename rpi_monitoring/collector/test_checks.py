@@ -120,6 +120,12 @@ def test_actions_allow(monkeypatch):
     monkeypatch.setenv("COLLECTOR_LOOP", "0")
     appmod._cache["snap"] = snap(build({}))
     c = TestClient(appmod.app)
+    page = c.get("/")
+    assert page.status_code == 200
+    assert "LCD monitor" in page.text
+    css = c.get("/static/style.css")
+    assert css.status_code == 200
+    assert "--ok" in css.text
     denied = c.post("/api/actions", json={"id": "wake"})
     assert denied.status_code == 403
     ok = c.post("/api/actions", json={"id": "backup"}, headers={"X-Forwarded-For": "ignored"})

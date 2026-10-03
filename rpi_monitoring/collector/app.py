@@ -5,7 +5,8 @@ import threading
 import time
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from checks import build
 from fetch import assemble, fire
@@ -15,6 +16,7 @@ app = FastAPI()
 _lock = threading.Lock()
 _cache = {"snap": None, "leader": True}
 ALLOW = {"192.168.0.89", "192.168.0.10", "127.0.0.1"}
+WEB = os.path.join(os.path.dirname(__file__), "web")
 
 
 def leader():
@@ -85,6 +87,19 @@ def ready():
     return {"ready": True, "leader": leader()}
 
 
+def _lan(host):
+    parts = (host or "").split(".")
+    return len(parts) == 4 and parts[0] == "192" and parts[1] == "168" and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts)
+
+
+@app.get("/")
+def index():
+    return FileResponse(os.path.join(WEB, "index.html"))
+
+
+app.mount("/static", StaticFiles(directory=WEB), name="static")
+
+
 @app.get("/api/display")
 def display():
     with _lock:
@@ -109,7 +124,7 @@ def display():
 @app.post("/api/actions")
 async def actions(request: Request):
     host = request.client.host if request.client else ""
-    if host not in ALLOW:
+    if host not in ALLOW and not _lan(host):
         return JSONResponse({"error": "forbidden"}, status_code=403)
     body = await request.json()
     action = body.get("id")

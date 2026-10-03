@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LCD monitor</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>LCD monitor</h1>
+  <p id="status">loading</p>
+  <p id="temp"></p>
+</header>
+<main id="grid"></main>
+<section id="detail" hidden>
+  <button id="back" type="button">Back</button>
+  <h2 id="title"></h2>
+  <div id="rows"></div>
+  <div id="actions"></div>
+</section>
+<p id="note"></p>
+<script>
+const grid = document.getElementById("grid");
+const detail = document.getElementById("detail");
+const rowsEl = document.getElementById("rows");
+const actionsEl = document.getElementById("actions");
+let snap = null;
+let openId = null;
+
+function word(state) {
+  if (state === "ok") return "ok";
+  if (state === "warn") return "warn";
+  if (state === "crit") return "bad";
+  if (state === "off") return "off";
+  if (state === "busy") return "busy";
+  return "idle";
+}
+
+function summary(s) {
+  const n = s.summary || {};
+  if (n.crit) return n.crit + " bad";
+  if (n.warn) return n.warn + " warn";
+  return "all ok";
+}
+
+function paint() {
+  if (!snap) return;
+  const st = document.getElementById("status");
+  st.textContent = summary(snap);
+  st.className = (snap.summary && snap.summary.crit) ? "crit" : (snap.summary && snap.summary.warn) ? "warn" : "ok";
+  document.getElementById("temp").textContent = snap.temp_out || "";
+  grid.innerHTML = "";
+  (snap.tiles || []).forEach(function (t) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "tile " + (t.state || "off");
+    b.innerHTML = "<span class='name'>" + t.label + "</span><span class='big'>" + (t.big || "--") + "</span><span class='cap'>" + (t.cap || word(t.state)) + "</span>";
+    b.onclick = function () { openId = t.id; show(); };
+    grid.appendChild(b);
+  });
+  if (openId) show();
+}
+
+function tileById(id) {
+  return (snap.tiles || []).find(function (t) { return t.id === id; });
+}
+
+function show() {
+  const t = tileById(openId);
+  if (!t) { detail.hidden = true; grid.hidden = false; return; }
+  grid.hidden = true;
+  detail.hidden = false;
+  document.getElementById("title").textContent = t.label;
+  rowsEl.innerHTML = "";
+  const page = (t.pages || [])[0] || {};
+  const rows = page.rows || [];
+  const dual = rows.some(function (r) { return r.length > 3; });
+  if (dual) {
+    const h = document.createElement("div");
+    h.className = "row head";
+    h.innerHTML = "<span></span><span>now</span><span>prev</span>";
+    rowsEl.appendChild(h);
+  }
+  rows.forEach(function (r) {
+    const d = document.createElement("div");
+    d.className = "row";
+    const a = document.createElement("span");
+    a.textContent = r[0] || "";
+    const b = document.createElement("span");
+    b.textContent = r[1] || "";
+    b.className = r[2] || "ok";
+    d.appendChild(a);
+    d.appendChild(b);
+    if (dual) {
+      const c = document.createElement("span");
+      c.textContent = r[3] || "";
+      c.className = r[4] || "";
+      d.appendChild(c);
+    }
+    rowsEl.appendChild(d);
+  });
+  actionsEl.innerHTML = "";
+  (page.actions || []).forEach(function (act) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = act.label;
+    b.disabled = !act.enabled;
+    b.onclick = function () { run(act); };
+    actionsEl.appendChild(b);
+  });
+}
+
+async function run(act) {
+  const title = (act.confirm && act.confirm.title) || act.label;
+  if (!window.confirm(title)) return;
+  document.getElementById("note").textContent = "sending";
+  const r = await fetch("/api/actions", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({id: act.id})
+  });
+  document.getElementById("note").textContent = r.ok ? (act.id === "wake" ? "magic packet sent" : "sent") : "failed";
+}
+
+document.getElementById("back").onclick = function () {
+  openId = null;
+  detail.hidden = true;
+  grid.hidden = false;
+};
+
+async function load() {
+  try {
+    const r = await fetch("/api/display");
+    if (!r.ok) throw new Error("http");
+    snap = await r.json();
+    paint();
+  } catch (e) {
+    document.getElementById("status").textContent = "no link";
+    document.getElementById("status").className = "crit";
+  }
+}
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>
