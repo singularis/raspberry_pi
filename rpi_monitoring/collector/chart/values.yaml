@@ -4,7 +4,7 @@ image:
   repository: ghcr.io/singularis/lcd-collector
   pullPolicy: Always
   # GitHub Actions replaces this with the short commit sha on main.
-  tag: "415d3d6"
+  tag: "bd1f732"
 
 namespace: lcd-monitor
 
