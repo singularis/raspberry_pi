@@ -20,6 +20,9 @@ const (
 	scrBang       = "bang"
 	scrCalib      = "calib"
 	scrGrey       = "grey"
+	scrSettings   = "settings"
+	scrTemp       = "temp"
+	scrBlank      = "blank"
 
 	bootGrace   = 2 * time.Minute
 	idleBack    = 5 * time.Second
@@ -89,6 +92,8 @@ type App struct {
 	Notes     chan string
 	CamOK     bool
 	CamAt     time.Duration
+	dirty     bool
+	Dim       int // 1 force night, -1 force day, 0 follow the clock
 }
 
 func newApp(now time.Time) *App {
@@ -119,7 +124,7 @@ func (a *App) advance(dt time.Duration) {
 	}
 	a.drainNotes()
 	a.refreshCam()
-	a.ThemeNight = a.inNight() && a.Mono > a.WakeUntil
+	a.ThemeNight = a.wantNight() && a.Mono > a.WakeUntil
 	if a.ThemeNight && a.Screen == scrHome && !a.Locked {
 		a.Screen = scrNight
 	}
@@ -128,7 +133,7 @@ func (a *App) advance(dt time.Duration) {
 	}
 	idle := a.Mono - a.IdleAt
 	switch a.Screen {
-	case scrDetail, scrCamera, scrConfirm, scrGrey:
+	case scrDetail, scrCamera, scrConfirm, scrGrey, scrSettings, scrTemp:
 		if !a.Locked && idle >= idleBack {
 			a.goHome()
 		}
@@ -157,9 +162,9 @@ func (a *App) viewSig() string {
 	if a.LastOK > 0 && a.Mono-a.LastOK >= staleAfter {
 		stale = "1"
 	}
-	return fmt.Sprintf("%s|%d|%d|%s|%v|%v|%v|%s|%s|%d|%v|%s|%s|%v",
+	return fmt.Sprintf("%s|%d|%d|%s|%v|%v|%v|%s|%s|%d|%v|%s|%s|%v|%d",
 		a.Screen, a.Tile, a.Page, a.Toast, a.Down, a.ThemeNight, a.Locked,
-		a.Now.Format("15:04"), ts, a.CalStep, a.Press, tick, stale, a.CamOK)
+		a.Now.Format("15:04"), ts, a.CalStep, a.Press, tick, stale, a.CamOK, a.Dim)
 }
 
 func (a *App) drainNotes() {
@@ -174,7 +179,11 @@ func (a *App) drainNotes() {
 }
 
 func (a *App) refreshCam() {
-	if a.CamAt != 0 && a.Mono-a.CamAt < camEvery {
+	every := camEvery
+	if !a.CamOK {
+		every = 5 * time.Second
+	}
+	if a.CamAt != 0 && a.Mono-a.CamAt < every {
 		return
 	}
 	a.CamOK = imxPresent()
@@ -194,6 +203,16 @@ func (a *App) linkDown() bool {
 	return a.Mono-a.Started >= linkDead
 }
 
+func (a *App) wantNight() bool {
+	if a.Dim > 0 {
+		return true
+	}
+	if a.Dim < 0 {
+		return false
+	}
+	return a.inNight()
+}
+
 func (a *App) inNight() bool {
 	h := a.Now.Hour()
 	if a.NightFrom > a.NightTo {
@@ -204,7 +223,7 @@ func (a *App) inNight() bool {
 
 func (a *App) goHome() {
 	a.Action = nil
-	if a.ThemeNight || (a.inNight() && a.Mono > a.WakeUntil) {
+	if a.wantNight() && a.Mono > a.WakeUntil {
 		a.Screen = scrNight
 	} else {
 		a.Screen = scrHome
@@ -310,7 +329,7 @@ func (a *App) tap(id string) {
 		}
 		return
 	}
-	if a.inNight() && a.Screen == scrNight {
+	if a.Screen == scrNight {
 		a.WakeUntil = a.Mono + nightWake
 		a.ThemeNight = false
 		a.Screen = scrHome
@@ -329,6 +348,16 @@ func (a *App) tap(id string) {
 		a.cameraTap(id)
 	case scrConfirm:
 		a.confirmTap(id)
+	case scrSettings:
+		a.settingsTap(id)
+	case scrTemp:
+		if id == "back" {
+			a.goHome()
+		}
+	case scrBlank:
+		a.WakeUntil = a.Mono + nightWake
+		a.ThemeNight = false
+		a.Screen = scrHome
 	}
 }
 
@@ -340,6 +369,11 @@ func (a *App) homeTap(id string) {
 		return
 	}
 	if id == "clock" {
+		a.Screen = scrSettings
+		return
+	}
+	if id == "temp" {
+		a.Screen = scrTemp
 		return
 	}
 	if len(id) > 5 && id[:5] == "tile:" {
@@ -567,12 +601,28 @@ func (a *App) ink() color.RGBA {
 	return color.RGBA{255, 255, 255, 255}
 }
 
+func (a *App) settingsTap(id string) {
+	switch id {
+	case "back":
+		a.goHome()
+	case "dim":
+		if a.wantNight() {
+			a.Dim = -1
+		} else {
+			a.Dim = 1
+		}
+		a.WakeUntil = 0
+	case "blank":
+		a.Screen = scrBlank
+	}
+}
+
 func (a *App) nightLook() bool {
 	switch a.Screen {
-	case scrBang, scrConnecting, scrBoot, scrCalib:
+	case scrBang, scrConnecting, scrBoot, scrCalib, scrBlank:
 		return false
 	}
-	return a.inNight()
+	return a.wantNight()
 }
 
 func (a *App) bg() color.RGBA {

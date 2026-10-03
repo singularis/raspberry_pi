@@ -6,7 +6,7 @@ func tile(id, label, state, big, cap, l2, l3 string, spark []float64) Tile {
 }
 
 func baseSnap() *Snapshot {
-	s := &Snapshot{Schema: 1, TS: "2026-09-26T15:43:00+01:00", NextInS: 58, TempOut: "16\u00b0C"}
+	s := &Snapshot{Schema: 1, TS: "2026-09-26T15:43:00+01:00", NextInS: 58, TempOut: "16\u00b0C", Humidity: "80%", Pressure: "1016"}
 	s.Tiles = []Tile{
 		tile("racoon", "RACOON", "ok", "37%", "cpu", "ram 41%", "56C 35W", []float64{30, 33, 37, 36, 37}),
 		tile("worker", "WORKER", "ok", "1.8G", "ram free", "cpu 23%", "52C 9W", []float64{2.0, 1.9, 1.8, 1.8}),

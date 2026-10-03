@@ -4,14 +4,13 @@ import "testing"
 
 func TestMapLandscapeCorners(t *testing.T) {
 	c := defaultCal()
-	// Raw (3900, 200) was the top-left before the panel was rotated 180 degrees.
 	x, y := mapCal(3900, 200, c)
-	if x < W-6 || y < H-6 {
-		t.Fatalf("old top-left is now bottom-right %d,%d", x, y)
+	if x > 5 || y > 5 {
+		t.Fatalf("top-left %d,%d", x, y)
 	}
 	x, y = mapCal(200, 3900, c)
-	if x > 5 || y > 5 {
-		t.Fatalf("old bottom-right is now top-left %d,%d", x, y)
+	if x < W-6 || y < H-6 {
+		t.Fatalf("bottom-right %d,%d", x, y)
 	}
 }
 

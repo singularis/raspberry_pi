@@ -36,6 +36,61 @@ func tap(a *App, id string) {
 	a.tap(id)
 }
 
+func TestClockTapBelowTheBar(t *testing.T) {
+	a := boot(t, time.Date(2026, 9, 26, 15, 43, 0, 0, time.UTC), baseSnap())
+	if a.hit(30, 40) != "clock" {
+		t.Fatalf("below the time got %s", a.hit(30, 40))
+	}
+	a.pointerDown(30, 40)
+	a.pointerUp(36, 48)
+	if a.Screen != scrSettings {
+		t.Fatalf("time tap stayed on %s", a.Screen)
+	}
+}
+
+func TestLockHoldsSettingsAndWeather(t *testing.T) {
+	day := time.Date(2026, 9, 26, 15, 43, 0, 0, time.UTC)
+	a := boot(t, day, baseSnap())
+	tap(a, "clock")
+	if a.hit(W-8, H-8) != "lock" {
+		t.Fatal("settings has no lock")
+	}
+	tap(a, "lock")
+	if !a.Locked || a.Screen != scrSettings {
+		t.Fatalf("settings lock screen %s locked %v", a.Screen, a.Locked)
+	}
+	a.advance(idleBack + time.Second)
+	if a.Screen != scrSettings {
+		t.Fatalf("locked settings left to %s", a.Screen)
+	}
+	tap(a, "back")
+	tap(a, "temp")
+	if a.hit(W-8, H-8) != "lock" {
+		t.Fatal("weather has no lock")
+	}
+	a.Locked = false
+	tap(a, "lock")
+	a.advance(idleBack + time.Second)
+	if !a.Locked || a.Screen != scrTemp {
+		t.Fatalf("locked weather screen %s locked %v", a.Screen, a.Locked)
+	}
+}
+
+func TestDimOnTapShowsHome(t *testing.T) {
+	day := time.Date(2026, 9, 26, 15, 43, 0, 0, time.UTC)
+	a := boot(t, day, baseSnap())
+	a.Screen = scrSettings
+	a.tap("dim")
+	a.tap("back")
+	if a.Screen != scrNight {
+		t.Fatalf("dim on showed %s", a.Screen)
+	}
+	a.tap("night")
+	if a.Screen != scrHome {
+		t.Fatalf("tap after dim on stayed %s", a.Screen)
+	}
+}
+
 func TestJourneys(t *testing.T) {
 	dir := filepath.Join(os.TempDir(), "lcd_journeys")
 	if v := os.Getenv("LCD_PREVIEW"); v != "" {
@@ -101,8 +156,9 @@ func TestJourneys(t *testing.T) {
 		t.Fatalf("J4 %s", a.Screen)
 	}
 
-	// J5 slide off
-	a.pointerDown(tileRect(0).Min.X+4, tileRect(0).Min.Y+4)
+	// J5 slide off. The top of the first tile is the clock target, so press the middle.
+	r0 := tileRect(0)
+	a.pointerDown(r0.Min.X+r0.Dx()/2, r0.Min.Y+r0.Dy()/2)
 	a.pointerUp(0, 0)
 	if a.Screen != scrHome {
 		t.Fatalf("J5 %s", a.Screen)
@@ -266,6 +322,8 @@ func TestTextBoxes(t *testing.T) {
 		a    *App
 	}{
 		{"home", boot(t, day, snap)},
+		{"settings", func() *App { a := boot(t, day, snap); tap(a, "clock"); return a }()},
+		{"temp", func() *App { a := boot(t, day, snap); tap(a, "temp"); return a }()},
 		{"detail", func() *App { a := boot(t, day, snap); tap(a, "tile:0"); return a }()},
 		{"confirm", func() *App { a := boot(t, day, snap); tap(a, "tile:5"); tap(a, "act:backup"); return a }()},
 		{"backup", func() *App { a := boot(t, day, snap); tap(a, "tile:5"); return a }()},

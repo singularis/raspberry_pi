@@ -5,11 +5,13 @@ import "encoding/json"
 // View model from the collector. The Pi draws this and does not interpret metrics.
 
 type Snapshot struct {
-	Schema  int    `json:"schema"`
-	TS      string `json:"ts"`
-	NextInS int    `json:"next_in_s"`
-	TempOut string `json:"temp_out,omitempty"`
-	Summary struct {
+	Schema   int    `json:"schema"`
+	TS       string `json:"ts"`
+	NextInS  int    `json:"next_in_s"`
+	TempOut  string `json:"temp_out,omitempty"`
+	Humidity string `json:"humidity,omitempty"`
+	Pressure string `json:"pressure,omitempty"`
+	Summary  struct {
 		Warn  int    `json:"warn"`
 		Crit  int    `json:"crit"`
 		Worst string `json:"worst"`

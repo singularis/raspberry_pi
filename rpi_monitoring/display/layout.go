@@ -34,12 +34,26 @@ func clockRect() image.Rectangle {
 	return image.Rect(4, 0, 78, statusH)
 }
 
+// clockHit is taller than the drawn time. The bar is 22px and a finger lands below it.
+func clockHit() image.Rectangle {
+	r := clockRect()
+	return image.Rect(0, 0, r.Max.X+8, r.Max.Y+36)
+}
+
 func recRect() image.Rectangle {
 	return image.Rect(172, 0, 228, statusH)
 }
 
 func outTempRect() image.Rectangle {
 	return image.Rect(232, 0, W-4, statusH)
+}
+
+func dimButton() image.Rectangle {
+	return image.Rect(16, 70, W-16, 130)
+}
+
+func blankButton() image.Rectangle {
+	return image.Rect(16, 146, W-16, lockRect().Min.Y-8)
 }
 
 // actionButtons is the right-hand column on a detail page, above the lock.

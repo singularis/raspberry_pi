@@ -4,13 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LCD monitor</title>
-<link rel="stylesheet" href="/static/style.css?v=5">
+<link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 <body>
 <main class="page">
-  <p class="mark">LCD monitor</p>
-  <h1 id="status">loading</h1>
-  <p id="temp" class="weather"></p>
+  <header class="top">
+    <p class="mark">LCD monitor</p>
+    <h1 id="status">loading</h1>
+    <p id="temp" class="weather"></p>
+  </header>
   <div id="sections"></div>
 </main>
 <script>
@@ -77,18 +79,18 @@ function paint() {
     const head = document.createElement("header");
     const h = document.createElement("h2");
     h.textContent = t.label || "";
+    head.appendChild(h);
+    if (t.cap) {
+      const cap = document.createElement("span");
+      cap.className = "cap";
+      cap.textContent = t.cap;
+      head.appendChild(cap);
+    }
     const big = document.createElement("p");
     big.className = "big";
     big.textContent = t.big || "--";
-    head.appendChild(h);
     head.appendChild(big);
     sec.appendChild(head);
-    if (t.cap) {
-      const cap = document.createElement("p");
-      cap.className = "cap";
-      cap.textContent = t.cap;
-      sec.appendChild(cap);
-    }
     const rows = document.createElement("div");
     rows.className = "rows";
     (t.pages || []).forEach(function (page) {

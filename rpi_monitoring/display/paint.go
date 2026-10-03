@@ -52,6 +52,7 @@ func (a *App) fitFace(s string, maxW int, faces ...font.Face) font.Face {
 }
 
 func (a *App) paint() {
+	a.dirty = true
 	a.boxes = nil
 	fill(a.Img, a.Img.Bounds(), a.bg())
 	ink := a.ink()
@@ -65,6 +66,7 @@ func (a *App) paint() {
 		white := color.RGBA{255, 255, 255, 255}
 		lines := []stackLine{{a.F.mono48, "!"}, {a.F.sans22, "no link"}}
 		a.stackCenter(white, 36, lines)
+	case scrBlank:
 	case scrNight:
 		a.put(a.F.mono48, a.Now.Format("15:04"), image.Rect(8, 70, W-8, 170), nightInk(), true)
 		if a.recording() {
@@ -81,8 +83,12 @@ func (a *App) paint() {
 		a.paintConfirm()
 	case scrCamera:
 		a.paintCamera(ink)
+	case scrSettings:
+		a.paintSettings(ink)
+	case scrTemp:
+		a.paintTemp(ink)
 	}
-	if a.Toast != "" && a.Screen != scrBang && a.Screen != scrNight {
+	if a.Toast != "" && a.Screen != scrBang && a.Screen != scrNight && a.Screen != scrBlank {
 		a.paintToast()
 	}
 }
@@ -264,10 +270,10 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 	}
 	a.put(a.F.sans22, title, titleRect(), white, true)
 	a.put(a.F.sans20, fmt.Sprintf("%d/%d", a.Page+1, pages), pageRect(), white, true)
-	if !headerOnly {
-		a.paintLock()
-	}
 	if headerOnly || t == nil || a.Page >= len(t.Pages) {
+		if !headerOnly {
+			a.paintLock()
+		}
 		return
 	}
 	p := t.Pages[a.Page]
@@ -278,6 +284,10 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 			val, st = "ok", "ok"
 		}
 		rows = append(rows, Row{Label: "cam", Value: val, State: st})
+		if !rowHas(rows, "temp") && t.Big != "" && t.Big != "--" && strings.Contains(strings.ToLower(t.Cap), "temp") {
+			rows = append(rows, Row{Label: "temp", Value: t.Big, State: "ok"})
+		}
+		rows = hoistRow(rows, "temp")
 	}
 	dual := false
 	for _, row := range rows {
@@ -322,6 +332,30 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 		}
 		a.paintAction(btns[i], act)
 	}
+	if !headerOnly {
+		a.paintLock()
+	}
+}
+
+func rowHas(rows []Row, label string) bool {
+	for _, row := range rows {
+		if row.Label == label && row.Value != "" && row.Value != "--" && row.Value != "off" {
+			return true
+		}
+	}
+	return false
+}
+
+func hoistRow(rows []Row, label string) []Row {
+	var hit, rest []Row
+	for _, row := range rows {
+		if row.Label == label {
+			hit = append(hit, row)
+		} else {
+			rest = append(rest, row)
+		}
+	}
+	return append(hit, rest...)
 }
 
 func (a *App) paintMetricRow(face font.Face, row Row, y, pitch, right int, dual bool) {
@@ -428,7 +462,6 @@ func (a *App) paintCamera(ink color.Color) {
 	fill(a.Img, image.Rect(0, 0, W, headerH), color.RGBA{0, 0, 0, 255})
 	a.put(a.F.sans22, "<", backRect(), ink, true)
 	a.put(a.F.sans22, "CAM", titleRect(), ink, true)
-	a.paintLock()
 	cam := &Camera{Phase: "idle", MaxS: 1800, Note: "live view pauses while recording"}
 	if t := a.cur(); t != nil && t.Camera != nil {
 		cam = t.Camera
@@ -453,6 +486,103 @@ func (a *App) paintCamera(ink color.Color) {
 	}
 	fill(a.Img, btn, bc)
 	a.put(a.F.sans28, label, btn.Inset(4), color.RGBA{255, 255, 255, 255}, true)
+	a.paintLock()
+}
+
+func (a *App) paintSettings(ink color.Color) {
+	white := color.RGBA{255, 255, 255, 255}
+	a.put(a.F.sans22, "<", backRect(), white, true)
+	a.put(a.F.sans22, "SET", titleRect(), white, true)
+	dim := dimButton()
+	blank := blankButton()
+	fill(a.Img, dim, dayFill("idle"))
+	fill(a.Img, blank, dayFill("off"))
+	label := "Dim off"
+	if a.wantNight() {
+		label = "Dim on"
+		fill(a.Img, dim, dayFill("ok"))
+	}
+	a.put(a.F.sans22, label, dim.Inset(6), white, true)
+	a.put(a.F.sans22, "Blank", blank.Inset(6), white, true)
+	a.paintLock()
+}
+
+func (a *App) paintTemp(ink color.Color) {
+	white := color.RGBA{255, 255, 255, 255}
+	grey := color.RGBA{156, 163, 175, 255}
+	a.put(a.F.sans22, "<", backRect(), white, true)
+	a.put(a.F.sans22, "TEMP", titleRect(), white, true)
+	y := headerH + 4
+	hh := faceH(a.F.sans14)
+	a.put(a.F.sans14, "weather", image.Rect(8, y, 150, y+hh), grey, false)
+	a.put(a.F.sans14, "devices", image.Rect(168, y, W-8, y+hh), grey, false)
+	y += hh + 6
+	lh := faceH(a.F.sans20) + 1
+	left := a.weatherLines()
+	right := a.tempLines()
+	n := len(left)
+	if len(right) > n {
+		n = len(right)
+	}
+	stop := lockRect().Min.Y - 4
+	for i := 0; i < n; i++ {
+		if y+lh > stop {
+			break
+		}
+		if i < len(left) {
+			a.put(a.F.sans20, left[i][0], image.Rect(8, y, 72, y+lh), white, false)
+			a.put(a.F.sans20, left[i][1], image.Rect(76, y, 156, y+lh), white, false)
+		}
+		if i < len(right) {
+			a.put(a.F.sans20, right[i][0], image.Rect(168, y, 236, y+lh), white, false)
+			a.put(a.F.sans20, right[i][1], image.Rect(240, y, W-4, y+lh), white, false)
+		}
+		y += lh
+	}
+	a.paintLock()
+}
+
+func (a *App) weatherLines() [][2]string {
+	if a.Snap == nil {
+		return nil
+	}
+	var out [][2]string
+	if a.Snap.TempOut != "" {
+		out = append(out, [2]string{"temp", a.Snap.TempOut})
+	}
+	if a.Snap.Humidity != "" {
+		out = append(out, [2]string{"humid", a.Snap.Humidity})
+	}
+	if a.Snap.Pressure != "" {
+		out = append(out, [2]string{"hPa", a.Snap.Pressure})
+	}
+	return out
+}
+
+func (a *App) tempLines() [][2]string {
+	if a.Snap == nil {
+		return nil
+	}
+	var out [][2]string
+	for _, t := range a.Snap.Tiles {
+		for _, p := range t.Pages {
+			for _, r := range p.Rows {
+				name := ""
+				switch r.Label {
+				case "temp":
+					name = shortName(t.Label)
+				case "cpu temp":
+					name = "GPU cpu"
+				case "gpu temp":
+					name = "GPU"
+				}
+				if name != "" && r.Value != "" && r.Value != "--" && r.Value != "off" {
+					out = append(out, [2]string{name, r.Value})
+				}
+			}
+		}
+	}
+	return out
 }
 
 func (a *App) paintCalib(ink color.Color) {
@@ -475,6 +605,8 @@ func (a *App) hit(x, y int) string {
 		return "cross"
 	case scrBang:
 		return "bang"
+	case scrBlank:
+		return "blank"
 	case scrNight:
 		return "night"
 	case scrConfirm:
@@ -521,9 +653,34 @@ func (a *App) hit(x, y int) string {
 		if p.In(image.Rect(W-80, 0, W, headerH)) {
 			return "page"
 		}
+	case scrSettings:
+		if p.In(lockHit()) {
+			return "lock"
+		}
+		if p.In(image.Rect(0, 0, 90, headerH)) {
+			return "back"
+		}
+		if p.In(dimButton()) {
+			return "dim"
+		}
+		if p.In(blankButton()) {
+			return "blank"
+		}
+		return ""
+	case scrTemp:
+		if p.In(lockHit()) {
+			return "lock"
+		}
+		if p.In(image.Rect(0, 0, 90, headerH)) {
+			return "back"
+		}
+		return ""
 	case scrHome, scrGrey:
-		if p.In(clockRect()) {
+		if a.Toast == "" && p.In(clockHit()) {
 			return "clock"
+		}
+		if a.Toast == "" && p.In(outTempRect()) {
+			return "temp"
 		}
 		if p.In(statusSummaryRect()) {
 			return "summary"

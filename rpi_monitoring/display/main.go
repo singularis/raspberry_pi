@@ -95,7 +95,6 @@ func runDevice(url string, refresh time.Duration) {
 	var downAt time.Time
 	var wasDown bool
 	var lx, ly int
-	var prev []byte
 	failWait := 5 * time.Second
 	for {
 		now = time.Now()
@@ -149,14 +148,14 @@ func runDevice(url string, refresh time.Duration) {
 				nextFetch = now.Add(wait)
 			}
 		}
-		if !bytes.Equal(prev, a.Img.Pix) {
+		if a.dirty {
 			disp.Blit(a.Img)
-			prev = append(prev[:0], a.Img.Pix...)
+			a.dirty = false
 		}
 		if wasDown {
 			time.Sleep(20 * time.Millisecond)
 		} else {
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 		}
 	}
 }

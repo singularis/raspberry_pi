@@ -21,6 +21,7 @@ type panel struct {
 	spi spi.Conn
 	dc  gpio.PinOut
 	rst gpio.PinOut
+	buf []byte
 }
 
 func (p panel) Close() {}
@@ -34,19 +35,26 @@ func (p panel) cmd(c byte, args ...byte) {
 	}
 }
 
-func (p panel) Blit(img *image.RGBA) {
+func (p *panel) Blit(img *image.RGBA) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	p.cmd(0x2A, 0, 0, byte((w-1)>>8), byte(w-1))
 	p.cmd(0x2B, 0, 0, byte((h-1)>>8), byte(h-1))
 	p.cmd(0x2C)
 	p.dc.Out(gpio.High)
-	buf := make([]byte, w*h*2)
+	n := w * h * 2
+	if cap(p.buf) < n {
+		p.buf = make([]byte, n)
+	}
+	buf := p.buf[:n]
+	pix := img.Pix
+	stride := img.Stride
 	j := 0
 	for y := 0; y < h; y++ {
+		row := pix[y*stride : y*stride+w*4]
 		for x := 0; x < w; x++ {
-			c := img.RGBAAt(x, y)
-			v := uint16(c.R&0xF8)<<8 | uint16(c.G&0xFC)<<3 | uint16(c.B)>>3
+			i := x * 4
+			v := uint16(row[i]&0xF8)<<8 | uint16(row[i+1]&0xFC)<<3 | uint16(row[i+2])>>3
 			buf[j] = byte(v >> 8)
 			buf[j+1] = byte(v)
 			j += 2
@@ -66,6 +74,8 @@ type touchDev struct {
 	spi spi.Conn
 	irq gpio.PinIn
 	cal calFile
+	tx  [3]byte
+	rx  [3]byte
 }
 
 type touchEv struct {
@@ -74,15 +84,18 @@ type touchEv struct {
 	Down       bool
 }
 
-func (t touchDev) Poll() (touchEv, bool) {
+func (t *touchDev) Poll() (touchEv, bool) {
+	// One pressure read while idle. The full 5-sample median runs only after a touch.
+	if t.read(0xB0) <= 80 {
+		return touchEv{}, false
+	}
 	var zs, xs, ys [5]int
 	for i := 0; i < 5; i++ {
 		zs[i] = t.read(0xB0)
 		xs[i] = t.read(0xD0)
 		ys[i] = t.read(0x90)
 	}
-	z := median5(zs)
-	if z <= 80 {
+	if median5(zs) <= 80 {
 		return touchEv{}, false
 	}
 	rx, ry := median5(xs), median5(ys)
@@ -90,10 +103,11 @@ func (t touchDev) Poll() (touchEv, bool) {
 	return touchEv{X: x, Y: y, RawX: rx, RawY: ry, Down: true}, true
 }
 
-func (t touchDev) read(cmd byte) int {
-	rb := []byte{0, 0, 0}
-	_ = t.spi.Tx([]byte{cmd, 0, 0}, rb)
-	return int(uint16(rb[1])<<8|uint16(rb[2])) >> 3
+func (t *touchDev) read(cmd byte) int {
+	t.tx[0], t.tx[1], t.tx[2] = cmd, 0, 0
+	t.rx[0], t.rx[1], t.rx[2] = 0, 0, 0
+	_ = t.spi.Tx(t.tx[:], t.rx[:])
+	return int(uint16(t.rx[1])<<8|uint16(t.rx[2])) >> 3
 }
 
 func openHardware() (panel, touchDev, error) {
@@ -125,7 +139,7 @@ func openHardware() (panel, touchDev, error) {
 	p.cmd(0x11)
 	time.Sleep(120 * time.Millisecond)
 	p.cmd(0x3A, 0x55)
-	p.cmd(0x36, 0xE8) // MY|MX|MV|BGR: 180 degrees from the old landscape (0x28)
+	p.cmd(0x36, 0x28) // MV|BGR landscape. Another 180 from 0xE8.
 	p.cmd(0xB1, 0x00, 0x18)
 	p.cmd(0x53, 0x2C)
 	p.cmd(0x51, 0xE0) // day ~7/8 if the hat wires brightness
@@ -141,7 +155,8 @@ func openHardware() (panel, touchDev, error) {
 	var in gpio.PinIn
 	if irq != nil {
 		in = irq
-		_ = irq.In(gpio.PullUp, gpio.BothEdges)
+		// Edges were unused and woke a kernel thread. Keep the pin pulled up only.
+		_ = irq.In(gpio.PullUp, gpio.NoEdge)
 	}
 	return p, touchDev{spi: ts, irq: in, cal: hwCal}, nil
 }
@@ -172,14 +187,14 @@ func loadCal(a *App) {
 		Y0: num(cal["y0"]), Y1: num(cal["y1"]),
 		Swap: cal["swap"] == true || num(cal["swap"]) == 1,
 	}
-	// A file saved before the 180 degree flip has no rot. Invert it once.
-	if _, ok := cal["rot"]; !ok {
+	// rot 3 was saved for MADCTL 0xE8. Flip that cal once for 0x28.
+	if num(cal["rot"]) == 3 {
 		c = flipCal(c)
 		swap := 0
 		if c.Swap {
 			swap = 1
 		}
-		touch["cal"] = map[string]int{"x0": c.X0, "x1": c.X1, "y0": c.Y0, "y1": c.Y1, "swap": swap, "rot": 3}
+		touch["cal"] = map[string]int{"x0": c.X0, "x1": c.X1, "y0": c.Y0, "y1": c.Y1, "swap": swap, "rot": 1}
 		if out, err := json.MarshalIndent(doc, "", "  "); err == nil {
 			_ = os.WriteFile(calPath(), out, 0o644)
 		}
@@ -222,7 +237,7 @@ func saveCal(a *App) {
 	if c.Swap {
 		swap = 1
 	}
-	touch["cal"] = map[string]int{"x0": c.X0, "x1": c.X1, "y0": c.Y0, "y1": c.Y1, "swap": swap, "rot": 3}
+	touch["cal"] = map[string]int{"x0": c.X0, "x1": c.X1, "y0": c.Y0, "y1": c.Y1, "swap": swap, "rot": 1}
 	out, _ := json.MarshalIndent(doc, "", "  ")
 	_ = os.WriteFile(calPath(), out, 0o644)
 	a.CalSaved = true

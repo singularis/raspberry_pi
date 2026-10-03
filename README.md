@@ -53,8 +53,9 @@ sudo ./rpi_camera/preinstall.sh
 Edit `/boot/firmware/config.txt` and ensure:
 
 ```text
+dtoverlay=vc4-kms-v3d,cma-128
 dtoverlay=imx519
-gpu_mem=128
+gpu_mem=64
 ```
 
 Reboot after changes.
