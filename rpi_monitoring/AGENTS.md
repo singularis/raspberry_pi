@@ -73,7 +73,13 @@ Namespace `lcd-monitor`, LoadBalancer `192.168.0.124:8000` (pod listens on 8010,
 
 ## WiFi watchdog
 
-`setting/wifi.json` + `setting/wifi_watchdog.sh` + timer/service. Ping router, bounce `wlan0`, reboot after repeated fails. Install: `./setting/install_wifi_watchdog.sh`. ExecStart must stay `setting/wifi_watchdog.sh`.
+`setting/wifi.json` + `setting/wifi_watchdog.sh` + timer/service. Ping router, bounce `wlan0`, reboot after repeated fails. Install: `./setting/install_wifi_watchdog.sh`. ExecStart must stay `/bin/bash setting/wifi_watchdog.sh`, so a copy without the exec bit still runs.
+
+## Scheduled reboot
+
+`setting/pi-reboot.timer` + `pi-reboot.service` + `pi_reboot.sh`. Once a day at 07:00 Europe/London. The watchdog handles drops; this only clears the slow stall where router pings still pass. Not `Persistent`. Skips if the Pi has been up under 10 min, waits up to 31 min for a recording, then logs uptime, free RAM and the WiFi `-110` count (`journalctl -t pi-reboot`). It replaced root's cron `0 4 * * * /sbin/shutdown -r now`. Install: `./setting/install_pi_reboot.sh`.
+
+- Motor hours (`~/motor_hours_service.py`, not in this repo) saves every 10 min while the drive is on and not at shutdown, so a reboot can drop up to 10 min of drive time
 
 ## Learnings
 
@@ -91,6 +97,8 @@ Namespace `lcd-monitor`, LoadBalancer `192.168.0.124:8000` (pod listens on 8010,
 - Touch: the IRQ lies, so use Z. The chip is portrait and the panel is landscape, so calibration has to see which raw axis is X. A press stays down until the finger lifts, so the loop must edge-detect. The lock only works if the corner is the hit target, not the icon pixels.
 - One SPI process. Full-frame blit every 20ms was ~20% CPU. Skip unchanged frames and poll at 100ms when idle.
 - One Picamera2. Recording is an encoder swap at 1280×960. Reopening 1080p/4K OOM'd the Zero. `RecFile` must be a buffered file.
+- From at least Oct 3 the WiFi watchdog never ran. `wifi_watchdog.sh` was `-rw-r--r--` on the Pi (git had it 100644), and every start failed with `203/EXEC`. Units now run scripts through `/bin/bash`.
+- When association times out, NetworkManager marks `wlan0` failed with `no-secrets` and stops trying. After the 04:00 reboot on Oct 5 that happened at 04:07, and again at 09:02. Both times the Pi stayed off until a power cycle. A reboot alone does not clear it; the watchdog's `nmcli device connect wlan0` does.
 - Picamera2 probes `/dev/video11` once at import and silently falls back to FFmpeg software MJPEG (8 threads). At boot udev gave the `video` group access at ~85 s, after the import had finished. That cost 100% CPU, 4 fps, ~125 MB RSS. The hardware path is ~60% CPU, 8 fps, ~74 MB. Native C++ `rpicam-vid` is ~13 MB but only a few points less CPU, because libcamera and the WiFi send dominate.
 
 ## Rules

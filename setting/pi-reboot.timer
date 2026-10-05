@@ -1,0 +1,12 @@
+[Unit]
+Description=Reboot the Pi every day at 07:00
+
+[Timer]
+OnCalendar=*-*-* 07:00:00 Europe/London
+AccuracySec=30s
+# A slot missed while the Pi was off must not fire at boot.
+Persistent=false
+Unit=pi-reboot.service
+
+[Install]
+WantedBy=timers.target

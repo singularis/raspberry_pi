@@ -1,0 +1,6 @@
+[Unit]
+Description=Scheduled Pi reboot (frees memory, restarts WiFi)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /home/dante/raspberry_pi/setting/pi_reboot.sh

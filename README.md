@@ -97,3 +97,12 @@ Every **5 minutes** it pings the router. If unreachable:
 ./setting/install_wifi_watchdog.sh
 journalctl -t wifi-watchdog -f
 ```
+
+## Scheduled reboot
+
+Reboots once a day at 07:00. Skips a Pi that booted in the last 10 minutes and lets a recording finish first.
+
+```bash
+./setting/install_pi_reboot.sh
+journalctl -t pi-reboot
+```
