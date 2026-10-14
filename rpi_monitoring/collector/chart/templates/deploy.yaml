@@ -49,6 +49,8 @@ spec:
                   fieldPath: metadata.namespace
             - name: REFRESH_S
               value: "{{ .Values.refreshSeconds }}"
+            - name: NODE_EXPORTER_PORT
+              value: "{{ .Values.nodeExporter.port }}"
           readinessProbe:
             httpGet:
               path: /ready

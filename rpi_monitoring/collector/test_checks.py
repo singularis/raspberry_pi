@@ -98,6 +98,45 @@ def test_detail_pages():
     assert by["network"]["big"].endswith("ms")
 
 
+NODE_SAMPLE = """# HELP node_cpu_seconds_total Seconds the CPUs spent in each mode.
+# TYPE node_cpu_seconds_total counter
+node_cpu_seconds_total{cpu="0",mode="idle"} 100
+node_cpu_seconds_total{cpu="0",mode="user"} 50
+node_cpu_seconds_total{cpu="1",mode="idle"} 100
+node_cpu_seconds_total{cpu="1",mode="user"} 50
+node_cpu_guest_seconds_total{cpu="0",mode="user"} 999
+node_memory_MemAvailable_bytes 4.294967296e+09
+node_memory_MemTotal_bytes 1.7179869184e+10
+node_filesystem_avail_bytes{device="/dev/nvme0n1p2",fstype="ext4",mountpoint="/"} 2.147483648e+11
+node_filesystem_size_bytes{device="/dev/nvme0n1p2",fstype="ext4",mountpoint="/"} 4.294967296e+11
+node_filesystem_avail_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/other_hdd"} 1e+12
+node_filesystem_size_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/other_hdd"} 2e+12
+node_filesystem_avail_bytes{device="/dev/nvme0n1p1",fstype="vfat",mountpoint="/boot/efi"} 5e+08
+node_filesystem_size_bytes{device="/dev/nvme0n1p1",fstype="vfat",mountpoint="/boot/efi"} 5.36870912e+08
+node_filesystem_size_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run"} 1e+09
+node_hwmon_temp_celsius{chip="platform_coretemp_0",sensor="temp1"} 61
+node_hwmon_temp_celsius{chip="platform_coretemp_0",sensor="temp2"} 70
+node_hwmon_temp_celsius{chip="nvme_nvme0",sensor="temp1"} 45
+"""
+
+
+def test_node_exporter(monkeypatch):
+    import fetch
+    assert fetch.scrape(None) == {}
+    fetch._node_cpu.clear()
+    text = {"body": NODE_SAMPLE}
+    monkeypatch.setattr(fetch, "scrape", lambda ip, timeout=3: fetch.parse_metrics(text["body"]))
+    first = fetch.node_metrics("racoon", "192.0.2.1")
+    assert first["cpu"] is None
+    assert round(first["ram_pct"]) == 75
+    assert round(first["free_gb"]) == 4
+    assert round(first["disk_pct"]) == 50
+    assert first["temp"] == 61
+    assert [d["name"] for d in first["disks"]] == ["other_hdd", "root", "boot-efi"]
+    text["body"] = NODE_SAMPLE.replace('mode="idle"} 100', 'mode="idle"} 130').replace('mode="user"} 50', 'mode="user"} 60')
+    assert round(fetch.node_metrics("racoon", "192.0.2.1")["cpu"]) == 25
+
+
 def test_protobuf_dish_count():
     assert dish_count(b"\x0a\x00\x0a\x00") == 2
 

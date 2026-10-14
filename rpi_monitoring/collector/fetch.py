@@ -1,6 +1,7 @@
 """Network checks. Each call is best-effort and returns a fact dict."""
 
 import os
+import re
 import socket
 import threading
 import time
@@ -10,7 +11,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import jwt
 
-PROM = os.environ.get("PROM_URL", "http://prometheus.lens-metrics.svc:80")
+NODE_EXPORTER_PORT = int(os.environ.get("NODE_EXPORTER_PORT", "9100"))
 BACKEPR = os.environ.get("BACKEPR_URL", "http://192.168.0.122:8000")
 PI = os.environ.get("PI_HEALTH_URL", "http://192.168.0.89:8080/health")
 VLLM = os.environ.get("VLLM_URL", "http://192.168.0.160:8000/health")
@@ -23,65 +24,92 @@ SYNTH_EMAIL = "singularis314@gmail.com"
 UA = "lcd-synthetic"
 
 
-def prom(query, timeout=4):
+_WANT = (
+    "node_cpu_seconds_total",
+    "node_memory_MemAvailable_bytes",
+    "node_memory_MemTotal_bytes",
+    "node_filesystem_avail_bytes",
+    "node_filesystem_size_bytes",
+    "node_hwmon_temp_celsius",
+)
+_SAMPLE = re.compile(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{(.*)\})?\s+(\S+)")
+_LABEL = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"')
+_DISK_FS = {"btrfs", "ext4", "xfs", "vfat"}
+_node_cpu = {}
+
+
+def parse_metrics(text):
+    """Prometheus text format. Keeps only the series the node tiles use."""
+    out = {}
+    for line in text.splitlines():
+        if not line.startswith(_WANT):
+            continue
+        m = _SAMPLE.match(line)
+        if not m:
+            continue
+        try:
+            value = float(m.group(3))
+        except ValueError:
+            continue
+        out.setdefault(m.group(1), []).append((dict(_LABEL.findall(m.group(2) or "")), value))
+    return out
+
+
+def scrape(ip, timeout=3):
+    """The chart's node-exporter on that node. The cluster has no Prometheus for node metrics."""
+    if not ip:
+        return {}
     try:
-        r = httpx.get(PROM + "/api/v1/query", params={"query": query}, timeout=timeout)
+        r = httpx.get(f"http://{ip}:{NODE_EXPORTER_PORT}/metrics", timeout=timeout)
         r.raise_for_status()
-        data = r.json()["data"]["result"]
-        return data
+        return parse_metrics(r.text)
     except Exception:
-        return []
+        return {}
 
 
-def _series(node, query):
-    rows = prom(query)
-    for row in rows:
-        if row.get("metric", {}).get("kubernetes_node") == node:
-            try:
-                return float(row["value"][1])
-            except (KeyError, IndexError, TypeError, ValueError):
-                return None
+def _root_fs(series, name):
+    for labels, value in series.get(name, []):
+        if labels.get("mountpoint") == "/" and labels.get("fstype") != "tmpfs":
+            return value
     return None
 
 
-def node_metrics(node):
-    # avg/max without "by (kubernetes_node)" drop the label and the sample is missed.
-    cpu = _series(node, f'100 - (avg by (kubernetes_node) (rate(node_cpu_seconds_total{{mode="idle",kubernetes_node="{node}"}}[5m])) * 100)')
-    avail = _series(node, f'node_memory_MemAvailable_bytes{{kubernetes_node="{node}"}}')
-    total = _series(node, f'node_memory_MemTotal_bytes{{kubernetes_node="{node}"}}')
-    disk_avail = _series(node, f'node_filesystem_avail_bytes{{kubernetes_node="{node}",mountpoint="/",fstype!="tmpfs"}}')
-    disk_size = _series(node, f'node_filesystem_size_bytes{{kubernetes_node="{node}",mountpoint="/",fstype!="tmpfs"}}')
-    temp = _series(node, f'max by (kubernetes_node) (node_hwmon_temp_celsius{{kubernetes_node="{node}",chip=~"platform_coretemp.*",sensor="temp1"}})')
-    ram_pct = (100 * (1 - avail / total)) if avail and total else None
+def node_metrics(node, ip):
+    series = scrape(ip)
+    cpu = None
+    cpu_rows = series.get("node_cpu_seconds_total") or []
+    if cpu_rows:
+        total = sum(v for _, v in cpu_rows)
+        idle = sum(v for labels, v in cpu_rows if labels.get("mode") == "idle")
+        cpu = cpu_busy(total, idle, _node_cpu, node)
+    avail = next((v for _, v in series.get("node_memory_MemAvailable_bytes", [])), None)
+    mem_total = next((v for _, v in series.get("node_memory_MemTotal_bytes", [])), None)
+    disk_avail = _root_fs(series, "node_filesystem_avail_bytes")
+    disk_size = _root_fs(series, "node_filesystem_size_bytes")
+    temps = [
+        v for labels, v in series.get("node_hwmon_temp_celsius", [])
+        if labels.get("chip", "").startswith("platform_coretemp") and labels.get("sensor") == "temp1"
+    ]
+    temp = max(temps) if temps else None
+    ram_pct = (100 * (1 - avail / mem_total)) if avail and mem_total else None
     disk_pct = (100 * (1 - disk_avail / disk_size)) if disk_avail and disk_size else None
     free_gb = (avail / (1024 ** 3)) if avail else None
-    return {"cpu": cpu, "ram_pct": ram_pct, "disk_pct": disk_pct, "temp": temp, "free_gb": free_gb, "ready": True, "disks": node_disks(node)}
+    return {"cpu": cpu, "ram_pct": ram_pct, "disk_pct": disk_pct, "temp": temp, "free_gb": free_gb, "ready": True, "disks": node_disks(series)}
 
 
-def node_disks(node):
+def node_disks(series):
     """Real mounts only. Skip container and snap namespaces."""
-    sizes = prom(
-        f'node_filesystem_size_bytes{{kubernetes_node="{node}",fstype=~"btrfs|ext4|xfs|vfat"}}'
-    )
-    frees = prom(
-        f'node_filesystem_avail_bytes{{kubernetes_node="{node}",fstype=~"btrfs|ext4|xfs|vfat"}}'
-    )
-    free_by = {}
-    for row in frees:
-        mp = (row.get("metric") or {}).get("mountpoint")
-        try:
-            free_by[mp] = float(row["value"][1])
-        except (KeyError, TypeError, ValueError):
-            pass
+    free_by = {
+        labels.get("mountpoint"): v
+        for labels, v in series.get("node_filesystem_avail_bytes", [])
+        if labels.get("fstype") in _DISK_FS
+    }
     out = []
-    for row in sizes:
-        metric = row.get("metric") or {}
-        mp = metric.get("mountpoint") or ""
-        if not mp or mp.startswith("/run") or "snapd" in mp or mp.startswith("/var/lib/kubelet"):
+    for labels, size in series.get("node_filesystem_size_bytes", []):
+        if labels.get("fstype") not in _DISK_FS:
             continue
-        try:
-            size = float(row["value"][1])
-        except (KeyError, TypeError, ValueError):
+        mp = labels.get("mountpoint") or ""
+        if not mp or mp.startswith("/run") or "snapd" in mp or mp.startswith("/var/lib/kubelet"):
             continue
         if size < 500 * 1024 * 1024 and mp != "/boot/efi":
             continue
@@ -116,6 +144,9 @@ def k8s_ready():
                 if cond.get("type") == "MemoryPressure" and cond.get("status") == "True" and name == "racoon-worker":
                     out.setdefault(name, {})["pressure"] = True
             out.setdefault(name, {})["ready"] = ready
+            for addr in item.get("status", {}).get("addresses", []):
+                if addr.get("type") == "InternalIP":
+                    out[name]["ip"] = addr.get("address")
         return out
     except Exception:
         return {}
@@ -192,7 +223,7 @@ def _pi_loop():
         except Exception:
             body = None
         if body is not None:
-            cpu = pi_cpu(body.get("cpu_total"), body.get("cpu_idle"), notes)
+            cpu = cpu_busy(body.get("cpu_total"), body.get("cpu_idle"), notes)
             with _pi_mu:
                 _pi["body"] = body
                 _pi["cpu"] = cpu
@@ -486,9 +517,9 @@ def throttled_flags(raw):
 
 def assemble():
     ready = k8s_ready()
-    rac = node_metrics("racoon")
-    wrk = node_metrics("racoon-worker")
-    gpu_m = node_metrics("racoon-gpu")
+    rac = node_metrics("racoon", (ready.get("racoon") or {}).get("ip"))
+    wrk = node_metrics("racoon-worker", (ready.get("racoon-worker") or {}).get("ip"))
+    gpu_m = node_metrics("racoon-gpu", (ready.get("racoon-gpu") or {}).get("ip"))
     nodes, dash, state = backepr()
     for key, src in (("racoon", rac), ("racoon-worker", wrk), ("racoon-gpu", gpu_m)):
         info = ready.get(key) or {}
@@ -760,11 +791,11 @@ def _mbps(v):
     return f"{v:.1f} Mb/s"
 
 
-def pi_cpu(total, idle, notes):
+def cpu_busy(total, idle, notes, key="pi_cpu"):
     if total is None or idle is None:
         return None
-    prev = notes.get("pi_cpu")
-    notes["pi_cpu"] = [total, idle]
+    prev = notes.get(key)
+    notes[key] = [total, idle]
     if not prev or len(prev) != 2:
         return None
     dt = total - prev[0]

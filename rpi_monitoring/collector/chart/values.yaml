@@ -16,6 +16,11 @@ service:
 
 refreshSeconds: 60
 
+# Node CPU, RAM, disk and temperature. The collector reads each node's :port directly.
+nodeExporter:
+  image: quay.io/prometheus/node-exporter:v1.12.1
+  port: 9100
+
 resources:
   requests:
     cpu: 20m
