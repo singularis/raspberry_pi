@@ -173,3 +173,29 @@ subjects:
   - kind: ServiceAccount
     name: lcd-collector
     namespace: lcd-monitor
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: lcd-collector-llm-command
+  namespace: gpu-lifecycle
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["gpu-lifecycle-controller-command"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lcd-collector-llm-command
+  namespace: gpu-lifecycle
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: lcd-collector-llm-command
+subjects:
+  - kind: ServiceAccount
+    name: lcd-collector
+    namespace: lcd-monitor

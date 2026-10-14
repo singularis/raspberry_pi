@@ -24,6 +24,8 @@ def test_states():
     assert gpu_state(False, False, False, False, None, None) == "off"
     assert gpu_state(False, True, False, True, None, None) == "off"
     assert gpu_state(True, True, False, True, True, 40) == "crit"
+    assert gpu_state(True, True, False, True, True, 40, "off") == "ok"
+    assert gpu_state(True, True, False, True, True, 40, "starting") == "ok"
     assert gpu_state(True, True, True, False, False, 40) == "warn"
     assert pi_state(47, 40, 40, False, False) == "ok"
     assert pi_state(None, None, None, False, False) == "stale"
@@ -37,6 +39,9 @@ def test_states():
     assert backup_state(False, False, False, False, False, False) == "crit"
     assert backup_state(True, False, False, False, False, True) == "busy"
     assert backup_state(True, True, False, False, False, False) == "warn"
+    assert backup_state(True, False, False, False, False, False, esp_down=True) == "crit"
+    assert backup_state(False, False, False, False, False, False, archive_only=True) == "warn"
+    assert backup_state(True, False, False, False, False, True, stuck=True) == "ok"
     assert net_state(False, True, 0, 10, 10, -50) == "crit"
     assert net_state(True, True, 0, 90, 10, -50) == "warn"
 

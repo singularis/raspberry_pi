@@ -139,6 +139,10 @@ def backepr():
         state = httpx.get(BACKEPR + "/api/actions/state", timeout=4).json()
     except Exception:
         pass
+    try:
+        state["esp"] = httpx.get(BACKEPR + "/api/health/esp", timeout=4).json()
+    except Exception:
+        state["esp"] = {}
     return out, dash, state
 
 
@@ -198,6 +202,59 @@ def _pi_loop():
             continue
         fail += 1
         time.sleep(min(120, 5 * (2 ** (fail - 1))))
+
+
+
+def llm_power_state():
+    """on, off, or starting. Empty when the command ConfigMap cannot be read."""
+    token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    if not os.path.exists(token_path):
+        return ""
+    try:
+        token = open(token_path).read()
+        r = httpx.get(
+            "https://kubernetes.default.svc/api/v1/namespaces/gpu-lifecycle/configmaps/gpu-lifecycle-controller-command",
+            headers={"Authorization": "Bearer " + token},
+            verify="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+            timeout=4,
+        )
+        r.raise_for_status()
+        data = (r.json().get("data") or {})
+        phase = (data.get("phase") or data.get("desired") or "").strip().lower()
+        if phase in ("off", "starting", "on"):
+            return phase
+        if (data.get("desired") or "") == "off":
+            return "off"
+        return ""
+    except Exception:
+        return ""
+
+
+
+def _archive_only(last):
+    steps = (last or {}).get("steps") or []
+    errors = [s for s in steps if (s.get("status") or "").lower() == "error"]
+    if not errors:
+        return False
+    def is_arch(step):
+        text = ((step.get("message") or "") + " " + (step.get("error") or "")).lower()
+        return "uuid" in text and "not found" in text
+    return all(is_arch(s) for s in errors)
+
+
+def _backup_stuck(last, state):
+    if not (state or {}).get("backup_running"):
+        return False
+    raw = (last or {}).get("finished_at") or ""
+    if not raw:
+        return False
+    try:
+        fin = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if fin.tzinfo is None:
+        fin = fin.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - fin).total_seconds() > 2 * 3600
 
 
 def vllm_up():
@@ -517,6 +574,7 @@ def assemble():
             "should_on": should_gpu_on(),
             "vllm": vllm,
             "vllm_late": vllm_late,
+            "llm_power": llm_power_state(),
             "temp": gpu_temp,
             "cpu": gpu_m.get("cpu"),
             "ram_pct": gpu_m.get("ram_pct"),
@@ -554,7 +612,11 @@ def assemble():
             "partial": last.get("status") not in (None, "success", "running"),
             "capacity_bad": storage.get("capacity_ok") is False,
             "smart_bad": smart_bad(),
-            "running": bool(state.get("backup_running")),
+            "running": (bool(state.get("backup_running")) and not _backup_stuck(last, state)),
+            "stuck": _backup_stuck(last, state),
+            "archive_only": _archive_only(last),
+            "esp_down": (state.get("esp") or {}).get("reachable") is False,
+            "esp_rssi": (state.get("esp") or {}).get("wifi_rssi"),
             "gpu_on": on,
             "age_d": age_d,
             "next": _short(dash.get("tiers")),

@@ -28,9 +28,12 @@ def node_state(ready, cpu, ram_pct, disk_pct, temp, free_gb=None, pressure=False
     return worst("ok", *states)
 
 
-def gpu_state(on, should_on, vllm_ready, vllm_late, claw_ok, temp):
+def gpu_state(on, should_on, vllm_ready, vllm_late, claw_ok, temp, llm_power=""):
     if not on:
         return "off"
+    # Idle sleep is intentional. Do not paint the tile red.
+    if llm_power in ("off", "starting"):
+        return "ok"
     states = ["ok"]
     if should_on and not vllm_ready and vllm_late:
         states.append("crit")
@@ -59,9 +62,16 @@ def eater_state(prod_ok, health_ok):
     return "ok"
 
 
-def backup_state(last_ok, overdue, partial, capacity_bad, smart_bad, running):
+def backup_state(last_ok, overdue, partial, capacity_bad, smart_bad, running, esp_down=False, archive_only=False, stuck=False):
+    if stuck:
+        running = False
+    if esp_down:
+        return "crit"
     if running:
         return "busy"
+    if archive_only:
+        last_ok = True
+        partial = True
     if not last_ok or smart_bad:
         return "crit"
     if overdue or partial or capacity_bad:
@@ -160,7 +170,7 @@ def _gpu_tile(gpu):
     on = bool(gpu.get("on"))
     should = bool(gpu.get("should_on"))
     claw_ok = gpu.get("claw_ok")
-    st = gpu_state(on, should, gpu.get("vllm"), gpu.get("vllm_late"), claw_ok, gpu.get("temp"))
+    st = gpu_state(on, should, gpu.get("vllm"), gpu.get("vllm_late"), claw_ok, gpu.get("temp"), gpu.get("llm_power") or "")
     watts = gpu.get("watts")
     watt_s = "" if watts is None else " " + str(int(round(watts))) + "W"
     if not on:
@@ -168,7 +178,14 @@ def _gpu_tile(gpu):
         rows = _off("cpu", "ram free", "gpu", "gpu ram", "staging free", "/ free", "cpu temp", "gpu temp", "k8s")
         pages = [{"rows": rows}]
     else:
-        big, l2 = _temp(gpu.get("temp")), "vllm " + ("up" if gpu.get("vllm") else "down") + watt_s
+        power = gpu.get("llm_power") or ""
+        if power == "off":
+            vllm_bit = "LLM off"
+        elif power == "starting":
+            vllm_bit = "LLM starting"
+        else:
+            vllm_bit = "vllm " + ("up" if gpu.get("vllm") else "down")
+        big, l2 = _temp(gpu.get("temp")), vllm_bit + watt_s
         node = {
             "cpu": gpu.get("cpu"),
             "ram_pct": gpu.get("ram_pct"),
@@ -188,7 +205,14 @@ def _gpu_tile(gpu):
         pages = [{"rows": rows}]
         if gpu.get("claw_lines"):
             pages.append({"rows": [_row("claw", ln, "warn" if claw_ok is False else "ok") for ln in gpu.get("claw_lines")[:4]]})
-    return tile("gpu", "GPU", st, big, l2=l2, l3="openclaw " + ("ok" if claw_ok else "warn" if claw_ok is False else "--"), pages=pages)
+    power = (gpu.get("llm_power") or "")
+    if power == "off":
+        l3 = "LLM off"
+    elif power == "starting":
+        l3 = "LLM starting"
+    else:
+        l3 = "openclaw " + ("ok" if claw_ok else "warn" if claw_ok is False else "--")
+    return tile("gpu", "GPU", st, big, l2=l2, l3=l3, pages=pages)
 
 
 def _pi_tile(pi):
@@ -233,11 +257,17 @@ def _eater_tile(eat):
 
 
 def _backup_tile(bak):
-    st = backup_state(bak.get("last_ok", True), bak.get("overdue"), bak.get("partial"), bak.get("capacity_bad"), bak.get("smart_bad"), bak.get("running"))
+    st = backup_state(
+        bak.get("last_ok", True), bak.get("overdue"), bak.get("partial"),
+        bak.get("capacity_bad"), bak.get("smart_bad"), bak.get("running"),
+        esp_down=bool(bak.get("esp_down")),
+        archive_only=bool(bak.get("archive_only")),
+        stuck=bool(bak.get("stuck")),
+    )
     stag = bak.get("staging_free_gb")
     arch = bak.get("archive_free_gb")
     arch_on = bak.get("archive_mounted")
-    big = "RUN" if bak.get("running") else (_amt(stag) if stag is not None else _ago(bak.get("age_d")))
+    big = "RUN" if bak.get("running") and not bak.get("stuck") else (_amt(stag) if stag is not None else _ago(bak.get("age_d")))
     gpu_on = bool(bak.get("gpu_on"))
     actions = [
         {
@@ -264,8 +294,9 @@ def _backup_tile(bak):
         staging_row = _row("staging free", "off", "off")
     pages = [{"rows": [
         staging_row,
-        _disk_row("archive", bak.get("archive_used_pct"), arch) if arch_on else _row("archive", "off", "off"),
-        _row("last", _ago(bak.get("age_d")), "ok" if bak.get("last_ok", True) else "crit"),
+        _disk_row("archive", bak.get("archive_used_pct"), arch) if arch_on else _row("archive", "idle", "off"),
+        _row("ESP", ("down" if bak.get("esp_down") else ("up " + str(bak.get("esp_rssi")) + "dBm" if bak.get("esp_rssi") is not None else "up")), "crit" if bak.get("esp_down") else "ok"),
+        _row("last", _ago(bak.get("age_d")), "ok" if bak.get("last_ok", True) or bak.get("archive_only") else "crit"),
     ], "actions": actions}]
     return tile("backup", "BACKUP", st, big, cap=cap, l2=bak.get("next") or "", l3="archive " + (bak.get("archive") or "--"), pages=pages)
 
