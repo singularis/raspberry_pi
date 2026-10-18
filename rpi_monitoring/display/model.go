@@ -26,6 +26,7 @@ type Sensor struct {
 	Temp     string `json:"temp,omitempty"`
 	Humidity string `json:"humidity,omitempty"`
 	Pressure string `json:"pressure,omitempty"`
+	Gas      string `json:"gas,omitempty"`
 }
 
 type Tile struct {

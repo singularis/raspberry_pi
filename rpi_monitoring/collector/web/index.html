@@ -72,6 +72,7 @@ function paint() {
   const sensor = snap.sensor || {};
   if (sensor.humidity) bits.push(sensor.humidity);
   if (sensor.pressure) bits.push(sensor.pressure + " hPa");
+  if (sensor.gas) bits.push("gas " + sensor.gas);
   if (snap.temp_out) bits.push("out " + snap.temp_out);
   document.getElementById("temp").textContent = bits.join("   ");
   sections.innerHTML = "";

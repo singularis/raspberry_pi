@@ -234,6 +234,8 @@ def _pi_tile(pi):
     if room is not None:
         rows.append(_hum_row(sensor.get("hum")))
         rows.append(_row("hPa", _n(None if sensor.get("press") is None else int(round(sensor["press"])))))
+        if sensor.get("gas") is not None:
+            rows.append(_row("gas", _gas_row(sensor.get("gas"))))
         rows.append(_temp_row("temp", room, 34, 40))
     else:
         rows.append(_temp_row("temp", soc, 70, 80))
@@ -417,6 +419,15 @@ def _cmp(label, today, prev):
 
 def _temp_row(label, celsius, warn, crit):
     return _row(label, _temp(celsius), _lvl_high(celsius, warn, crit))
+
+
+def _gas_row(ohms):
+    n = float(ohms)
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1000:
+        return str(int(round(n / 1000))) + "k"
+    return str(int(round(n)))
 
 
 def _hum_row(v):

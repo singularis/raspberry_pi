@@ -7,6 +7,15 @@ def _round_text(v, suffix):
     return str(int(round(float(v)))) + suffix
 
 
+def _gas_text(ohms):
+    n = float(ohms)
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1000:
+        return str(int(round(n / 1000))) + "k"
+    return str(int(round(n)))
+
+
 def snap(tiles, next_in_s=60, temp_out=None, weather=None, sensor=None):
     warn = sum(1 for t in tiles if t["state"] == "warn")
     crit = sum(1 for t in tiles if t["state"] == "crit")
@@ -44,6 +53,8 @@ def snap(tiles, next_in_s=60, temp_out=None, weather=None, sensor=None):
         room["humidity"] = _round_text(s["hum"], "%")
     if s.get("press") is not None:
         room["pressure"] = _round_text(s["press"], "")
+    if s.get("gas") is not None:
+        room["gas"] = _gas_text(s["gas"])
     if room:
         body["sensor"] = room
     return body

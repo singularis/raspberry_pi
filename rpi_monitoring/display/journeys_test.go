@@ -79,7 +79,7 @@ func TestLockHoldsSettingsAndWeather(t *testing.T) {
 func TestRoomSensorColumn(t *testing.T) {
 	a := boot(t, time.Date(2026, 9, 26, 15, 43, 0, 0, time.UTC), baseSnap())
 	lines := a.sensorLines()
-	if len(lines) != 3 || lines[0] != [2]string{"temp", "27°C"} || lines[1][0] != "humid" || lines[2][0] != "hPa" {
+	if len(lines) != 4 || lines[0] != [2]string{"temp", "27°C"} || lines[1][0] != "humid" || lines[2][0] != "hPa" || lines[3] != [2]string{"gas", "1.9M"} {
 		t.Fatalf("%v", lines)
 	}
 	if a.Snap.TempIn != "27°C" || a.Snap.TempOut != "16°C" {

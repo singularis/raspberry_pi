@@ -557,6 +557,9 @@ func (a *App) paintMeter(lines [][2]string, y, stop int) int {
 		if ln[0] == "hPa" {
 			bit += " hPa"
 		}
+		if ln[0] == "gas" {
+			bit = "gas " + bit
+		}
 		if extra != "" {
 			extra += "  "
 		}
@@ -609,6 +612,9 @@ func (a *App) sensorLines() [][2]string {
 	}
 	if s.Pressure != "" {
 		out = append(out, [2]string{"hPa", s.Pressure})
+	}
+	if s.Gas != "" {
+		out = append(out, [2]string{"gas", s.Gas})
 	}
 	return out
 }

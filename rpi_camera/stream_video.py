@@ -783,7 +783,8 @@ def _bme680():
     temp = _iio_float(os.path.join(base, "in_temp_input"))
     hum = _iio_float(os.path.join(base, "in_humidityrelative_input"))
     press = _iio_float(os.path.join(base, "in_pressure_input"))
-    if temp is None and hum is None and press is None:
+    gas = _iio_float(os.path.join(base, "in_resistance_input"))
+    if temp is None and hum is None and press is None and gas is None:
         return None
     if temp is not None and abs(temp) > 200:
         temp /= 1000.0
@@ -801,6 +802,8 @@ def _bme680():
         out["humidity"] = round(hum, 1)
     if press is not None:
         out["pressure_hpa"] = round(press, 1)
+    if gas is not None and gas > 0:
+        out["gas_ohm"] = int(round(gas))
     return out or None
 
 

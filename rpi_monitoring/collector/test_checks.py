@@ -148,28 +148,29 @@ def test_room_sensor():
             "ram_free": 200,
             "ram_mb": 428,
             "sd_pct": 40,
-            "sensor": {"temp": 26.8, "hum": 37.8, "press": 1028.6},
+            "sensor": {"temp": 26.8, "hum": 37.8, "press": 1028.6, "gas": 1946260},
         },
     })
     pi = {t["id"]: t for t in tiles}["pi"]
     assert pi["big"] == "57C"
     assert pi["cap"] == "soc"
     assert pi["state"] == "ok"
-    assert [r[0] for r in pi["pages"][0]["rows"]] == ["soc", "cpu", "ram free", "sd free", "humid", "hPa", "temp", "power"]
+    assert [r[0] for r in pi["pages"][0]["rows"]] == ["soc", "cpu", "ram free", "sd free", "humid", "hPa", "gas", "temp", "power"]
     rows = {r[0]: r for r in pi["pages"][0]["rows"]}
     assert rows["temp"] == ["temp", "27C", "ok"]
     assert rows["humid"][1] == "38%"
     assert rows["hPa"] == ["hPa", "1029", "ok"]
+    assert rows["gas"] == ["gas", "1.9M", "ok"]
     assert rows["soc"] == ["soc", "57C", "ok"]
     body = snap(
         tiles,
         weather={"temp": 16, "hum": 80, "press": 1016},
-        sensor={"temp": 26.8, "hum": 37.8, "press": 1028.6},
+        sensor={"temp": 26.8, "hum": 37.8, "press": 1028.6, "gas": 1946260},
     )
     assert body["temp_out"] == "16°C"
     assert body["temp_in"] == "27°C"
     assert body["humidity"] == "80%"
-    assert body["sensor"] == {"temp": "27°C", "humidity": "38%", "pressure": "1029"}
+    assert body["sensor"] == {"temp": "27°C", "humidity": "38%", "pressure": "1029", "gas": "1.9M"}
     plain = {t["id"]: t for t in build({"pi": {"temp": 47, "ram_free": 241, "sd_pct": 40}})}["pi"]
     assert plain["cap"] == "cpu temp"
     assert plain["big"] == "47C"

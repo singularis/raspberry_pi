@@ -865,7 +865,10 @@ def _room(raw):
     """BME680 sample from the Pi /health body. None when the chip is absent."""
     if not isinstance(raw, dict) or raw.get("temp_c") is None:
         return None
-    return {"temp": raw.get("temp_c"), "hum": raw.get("humidity"), "press": raw.get("pressure_hpa")}
+    out = {"temp": raw.get("temp_c"), "hum": raw.get("humidity"), "press": raw.get("pressure_hpa")}
+    if raw.get("gas_ohm") is not None:
+        out["gas"] = raw.get("gas_ohm")
+    return out
 
 
 def weather():
