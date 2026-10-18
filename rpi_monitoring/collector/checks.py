@@ -223,23 +223,25 @@ def _pi_tile(pi):
     soc = pi.get("temp")
     sensor = pi.get("sensor") or {}
     room = sensor.get("temp")
-    shown = room if room is not None else soc
     st = pi_state(soc, used, sd, pi.get("throttled_now"), pi.get("throttled_boot"))
     power = "bad" if pi.get("throttled_now") or pi.get("throttled_boot") else "ok"
-    rows = [_cpu_row(pi.get("cpu")), _pi_ram_row(used, free_mb)]
+    rows = []
+    if room is not None:
+        rows.append(_temp_row("soc", soc, 70, 80))
+    rows.append(_cpu_row(pi.get("cpu")))
+    rows.append(_pi_ram_row(used, free_mb))
     rows.append(_disk_row("sd", pi.get("sd_pct"), (pi.get("sd_free_mb") / 1024) if pi.get("sd_free_mb") is not None else None))
     if room is not None:
-        rows.append(_temp_row("temp", room, 34, 40))
         rows.append(_hum_row(sensor.get("hum")))
         rows.append(_row("hPa", _n(None if sensor.get("press") is None else int(round(sensor["press"])))))
-        rows.append(_temp_row("soc", soc, 70, 80))
+        rows.append(_temp_row("temp", room, 34, 40))
     else:
         rows.append(_temp_row("temp", soc, 70, 80))
     rows.append(_row("power", power, "crit" if power == "bad" else "ok"))
     return tile(
         "pi", "PI", st,
-        _temp(shown),
-        cap="room" if room is not None else "cpu temp",
+        _temp(soc),
+        cap="soc" if room is not None else "cpu temp",
         l2="ram " + (str(pi.get("ram_free")) + "M" if pi.get("ram_free") is not None else "--"),
         l3="power " + power,
         pages=[{"rows": rows}],

@@ -287,7 +287,11 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 		if !rowHas(rows, "temp") && t.Big != "" && t.Big != "--" && strings.Contains(strings.ToLower(t.Cap), "temp") {
 			rows = append(rows, Row{Label: "temp", Value: t.Big, State: "ok"})
 		}
-		rows = hoistRow(rows, "temp")
+		if rowHas(rows, "soc") {
+			rows = hoistRow(rows, "soc")
+		} else {
+			rows = hoistRow(rows, "temp")
+		}
 	}
 	dual := false
 	for _, row := range rows {
@@ -514,42 +518,64 @@ func (a *App) paintTemp(ink color.Color) {
 	a.put(a.F.sans22, "TEMP", titleRect(), white, true)
 	y := headerH + 4
 	hh := faceH(a.F.sans14)
-	a.put(a.F.sans14, "weather", image.Rect(4, y, 100, y+hh), grey, false)
-	a.put(a.F.sans14, "sensor", image.Rect(104, y, 200, y+hh), grey, false)
-	a.put(a.F.sans14, "devices", image.Rect(204, y, W-4, y+hh), grey, false)
-	y += hh + 4
-	lh := hh + 2
-	type col struct {
-		lines  [][2]string
-		x0, x1 int
-		v0, v1 int
-	}
-	cols := []col{
-		{a.weatherLines(), 4, 52, 54, 102},
-		{a.sensorLines(), 104, 152, 154, 202},
-		{a.tempLines(), 204, 262, 264, W - 4},
-	}
-	n := 0
-	for _, c := range cols {
-		if len(c.lines) > n {
-			n = len(c.lines)
-		}
-	}
 	stop := lockRect().Min.Y - 4
-	for i := 0; i < n; i++ {
-		if y+lh > stop {
+	// Right column stays the device list, same size and place as before.
+	a.put(a.F.sans14, "devices", image.Rect(168, y, W-8, y+hh), grey, false)
+	ry := y + hh + 6
+	lh := faceH(a.F.sans20) + 1
+	for _, row := range a.tempLines() {
+		if ry+lh > stop {
 			break
 		}
-		for _, c := range cols {
-			if i >= len(c.lines) {
-				continue
-			}
-			a.put(a.F.sans14, c.lines[i][0], image.Rect(c.x0, y, c.x1, y+lh), white, false)
-			a.put(a.F.sans14, c.lines[i][1], image.Rect(c.v0, y, c.v1, y+lh), white, false)
-		}
-		y += lh
+		a.put(a.F.sans20, row[0], image.Rect(168, ry, 236, ry+lh), white, false)
+		a.put(a.F.sans20, row[1], image.Rect(240, ry, W-4, ry+lh), white, false)
+		ry += lh
+	}
+	// Left column is two blocks: the room sensor, then the internet forecast.
+	a.put(a.F.sans14, "sensor", image.Rect(8, y, 160, y+hh), grey, false)
+	ly := a.paintMeter(a.sensorLines(), y+hh+2, stop)
+	ly += 6
+	if ly+hh < stop {
+		a.put(a.F.sans14, "weather", image.Rect(8, ly, 160, ly+hh), grey, false)
+		a.paintMeter(a.weatherLines(), ly+hh+2, stop)
 	}
 	a.paintLock()
+}
+
+func (a *App) paintMeter(lines [][2]string, y, stop int) int {
+	white := color.RGBA{255, 255, 255, 255}
+	temp, extra := "", ""
+	for _, ln := range lines {
+		if ln[0] == "temp" {
+			temp = ln[1]
+			continue
+		}
+		if ln[1] == "" {
+			continue
+		}
+		bit := ln[1]
+		if ln[0] == "hPa" {
+			bit += " hPa"
+		}
+		if extra != "" {
+			extra += "  "
+		}
+		extra += bit
+	}
+	if temp == "" && extra == "" {
+		return y
+	}
+	big := faceH(a.F.sans22) + 2
+	if temp != "" && y+big <= stop {
+		a.put(a.F.sans22, temp, image.Rect(8, y, 160, y+big), white, false)
+		y += big
+	}
+	small := faceH(a.F.sans14) + 2
+	if extra != "" && y+small <= stop {
+		a.put(a.F.sans14, extra, image.Rect(8, y, 160, y+small), white, false)
+		y += small
+	}
+	return y
 }
 
 func (a *App) weatherLines() [][2]string {

@@ -152,9 +152,10 @@ def test_room_sensor():
         },
     })
     pi = {t["id"]: t for t in tiles}["pi"]
-    assert pi["big"] == "27C"
-    assert pi["cap"] == "room"
+    assert pi["big"] == "57C"
+    assert pi["cap"] == "soc"
     assert pi["state"] == "ok"
+    assert [r[0] for r in pi["pages"][0]["rows"]] == ["soc", "cpu", "ram free", "sd free", "humid", "hPa", "temp", "power"]
     rows = {r[0]: r for r in pi["pages"][0]["rows"]}
     assert rows["temp"] == ["temp", "27C", "ok"]
     assert rows["humid"][1] == "38%"
