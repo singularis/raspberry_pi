@@ -627,6 +627,7 @@ def assemble():
         },
         "pi": {
             "temp": pi.get("temp_c"),
+            "sensor": _room(pi.get("sensor")),
             "ram_free": ram_free,
             "sd_pct": sd_pct,
             "throttled_now": now_t,
@@ -858,6 +859,13 @@ def proxmox_cpu_c():
 
 _wx_mu = threading.Lock()
 _wx = {"data": None, "at": 0.0}
+
+
+def _room(raw):
+    """BME680 sample from the Pi /health body. None when the chip is absent."""
+    if not isinstance(raw, dict) or raw.get("temp_c") is None:
+        return None
+    return {"temp": raw.get("temp_c"), "hum": raw.get("humidity"), "press": raw.get("pressure_hpa")}
 
 
 def weather():

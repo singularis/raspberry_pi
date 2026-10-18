@@ -76,6 +76,21 @@ func TestLockHoldsSettingsAndWeather(t *testing.T) {
 	}
 }
 
+func TestRoomSensorColumn(t *testing.T) {
+	a := boot(t, time.Date(2026, 9, 26, 15, 43, 0, 0, time.UTC), baseSnap())
+	lines := a.sensorLines()
+	if len(lines) != 3 || lines[0] != [2]string{"temp", "27°C"} || lines[1][0] != "humid" || lines[2][0] != "hPa" {
+		t.Fatalf("%v", lines)
+	}
+	if a.Snap.TempIn != "27°C" || a.Snap.TempOut != "16°C" {
+		t.Fatalf("in %s out %s", a.Snap.TempIn, a.Snap.TempOut)
+	}
+	tap(a, "temp")
+	if a.Screen != scrTemp {
+		t.Fatalf("temp screen %s", a.Screen)
+	}
+}
+
 func TestDimOnTapShowsHome(t *testing.T) {
 	day := time.Date(2026, 9, 26, 15, 43, 0, 0, time.UTC)
 	a := boot(t, day, baseSnap())

@@ -5,18 +5,27 @@ import "encoding/json"
 // View model from the collector. The Pi draws this and does not interpret metrics.
 
 type Snapshot struct {
-	Schema   int    `json:"schema"`
-	TS       string `json:"ts"`
-	NextInS  int    `json:"next_in_s"`
-	TempOut  string `json:"temp_out,omitempty"`
-	Humidity string `json:"humidity,omitempty"`
-	Pressure string `json:"pressure,omitempty"`
+	Schema   int     `json:"schema"`
+	TS       string  `json:"ts"`
+	NextInS  int     `json:"next_in_s"`
+	TempOut  string  `json:"temp_out,omitempty"`
+	TempIn   string  `json:"temp_in,omitempty"`
+	Humidity string  `json:"humidity,omitempty"`
+	Pressure string  `json:"pressure,omitempty"`
+	Sensor   *Sensor `json:"sensor,omitempty"`
 	Summary  struct {
 		Warn  int    `json:"warn"`
 		Crit  int    `json:"crit"`
 		Worst string `json:"worst"`
 	} `json:"summary"`
 	Tiles []Tile `json:"tiles"`
+}
+
+// Sensor is the BME680 in the room. TempOut stays the outdoor forecast.
+type Sensor struct {
+	Temp     string `json:"temp,omitempty"`
+	Humidity string `json:"humidity,omitempty"`
+	Pressure string `json:"pressure,omitempty"`
 }
 
 type Tile struct {

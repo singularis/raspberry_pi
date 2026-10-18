@@ -28,7 +28,7 @@ def refresh():
         return
     try:
         facts = assemble()
-        built = snap(build(facts), weather=facts.get("weather"))
+        built = snap(build(facts), weather=facts.get("weather"), sensor=(facts.get("pi") or {}).get("sensor"))
     except Exception as exc:
         built = _cache.get("snap")
         print("refresh failed", type(exc).__name__)

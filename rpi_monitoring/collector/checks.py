@@ -220,16 +220,26 @@ def _pi_tile(pi):
     free_mb = pi.get("ram_free")
     total_mb = pi.get("ram_mb")
     used = (100 * (1 - free_mb / total_mb)) if free_mb is not None and total_mb else None
-    st = pi_state(pi.get("temp"), used, sd, pi.get("throttled_now"), pi.get("throttled_boot"))
+    soc = pi.get("temp")
+    sensor = pi.get("sensor") or {}
+    room = sensor.get("temp")
+    shown = room if room is not None else soc
+    st = pi_state(soc, used, sd, pi.get("throttled_now"), pi.get("throttled_boot"))
     power = "bad" if pi.get("throttled_now") or pi.get("throttled_boot") else "ok"
     rows = [_cpu_row(pi.get("cpu")), _pi_ram_row(used, free_mb)]
     rows.append(_disk_row("sd", pi.get("sd_pct"), (pi.get("sd_free_mb") / 1024) if pi.get("sd_free_mb") is not None else None))
-    rows.append(_temp_row("temp", pi.get("temp"), 70, 80))
+    if room is not None:
+        rows.append(_temp_row("temp", room, 34, 40))
+        rows.append(_hum_row(sensor.get("hum")))
+        rows.append(_row("hPa", _n(None if sensor.get("press") is None else int(round(sensor["press"])))))
+        rows.append(_temp_row("soc", soc, 70, 80))
+    else:
+        rows.append(_temp_row("temp", soc, 70, 80))
     rows.append(_row("power", power, "crit" if power == "bad" else "ok"))
     return tile(
         "pi", "PI", st,
-        _temp(pi.get("temp")),
-        cap="cpu temp",
+        _temp(shown),
+        cap="room" if room is not None else "cpu temp",
         l2="ram " + (str(pi.get("ram_free")) + "M" if pi.get("ram_free") is not None else "--"),
         l3="power " + power,
         pages=[{"rows": rows}],
@@ -405,6 +415,17 @@ def _cmp(label, today, prev):
 
 def _temp_row(label, celsius, warn, crit):
     return _row(label, _temp(celsius), _lvl_high(celsius, warn, crit))
+
+
+def _hum_row(v):
+    if v is None:
+        return _row("humid", "--", "stale")
+    st = "ok"
+    if v < 30 or v > 65:
+        st = "warn"
+    if v < 15 or v > 80:
+        st = "crit"
+    return _row("humid", str(int(round(v))) + "%", st)
 
 
 def _disk_label(name):

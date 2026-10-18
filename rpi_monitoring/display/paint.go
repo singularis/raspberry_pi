@@ -134,12 +134,12 @@ func (a *App) paintHome(ink color.Color) {
 	if a.recording() {
 		a.put(a.F.sans14, "REC", recRect(), color.RGBA{255, 80, 80, 255}, true)
 	}
-	if a.Toast == "" && a.Snap != nil && a.Snap.TempOut != "" {
+	if a.Toast == "" && a.Snap != nil && a.Snap.TempIn != "" {
 		tc := ink
 		if a.nightLook() {
 			tc = nightInk()
 		}
-		a.put(a.F.sans14, a.Snap.TempOut, outTempRect(), tc, true)
+		a.put(a.F.sans14, a.Snap.TempIn, outTempRect(), tc, true)
 	}
 	if a.Snap == nil {
 		return
@@ -514,28 +514,38 @@ func (a *App) paintTemp(ink color.Color) {
 	a.put(a.F.sans22, "TEMP", titleRect(), white, true)
 	y := headerH + 4
 	hh := faceH(a.F.sans14)
-	a.put(a.F.sans14, "weather", image.Rect(8, y, 150, y+hh), grey, false)
-	a.put(a.F.sans14, "devices", image.Rect(168, y, W-8, y+hh), grey, false)
-	y += hh + 6
-	lh := faceH(a.F.sans20) + 1
-	left := a.weatherLines()
-	right := a.tempLines()
-	n := len(left)
-	if len(right) > n {
-		n = len(right)
+	a.put(a.F.sans14, "weather", image.Rect(4, y, 100, y+hh), grey, false)
+	a.put(a.F.sans14, "sensor", image.Rect(104, y, 200, y+hh), grey, false)
+	a.put(a.F.sans14, "devices", image.Rect(204, y, W-4, y+hh), grey, false)
+	y += hh + 4
+	lh := hh + 2
+	type col struct {
+		lines  [][2]string
+		x0, x1 int
+		v0, v1 int
+	}
+	cols := []col{
+		{a.weatherLines(), 4, 52, 54, 102},
+		{a.sensorLines(), 104, 152, 154, 202},
+		{a.tempLines(), 204, 262, 264, W - 4},
+	}
+	n := 0
+	for _, c := range cols {
+		if len(c.lines) > n {
+			n = len(c.lines)
+		}
 	}
 	stop := lockRect().Min.Y - 4
 	for i := 0; i < n; i++ {
 		if y+lh > stop {
 			break
 		}
-		if i < len(left) {
-			a.put(a.F.sans20, left[i][0], image.Rect(8, y, 72, y+lh), white, false)
-			a.put(a.F.sans20, left[i][1], image.Rect(76, y, 156, y+lh), white, false)
-		}
-		if i < len(right) {
-			a.put(a.F.sans20, right[i][0], image.Rect(168, y, 236, y+lh), white, false)
-			a.put(a.F.sans20, right[i][1], image.Rect(240, y, W-4, y+lh), white, false)
+		for _, c := range cols {
+			if i >= len(c.lines) {
+				continue
+			}
+			a.put(a.F.sans14, c.lines[i][0], image.Rect(c.x0, y, c.x1, y+lh), white, false)
+			a.put(a.F.sans14, c.lines[i][1], image.Rect(c.v0, y, c.v1, y+lh), white, false)
 		}
 		y += lh
 	}
@@ -559,6 +569,35 @@ func (a *App) weatherLines() [][2]string {
 	return out
 }
 
+func (a *App) sensorLines() [][2]string {
+	if a.Snap == nil || a.Snap.Sensor == nil {
+		return nil
+	}
+	s := a.Snap.Sensor
+	var out [][2]string
+	if s.Temp != "" {
+		out = append(out, [2]string{"temp", s.Temp})
+	}
+	if s.Humidity != "" {
+		out = append(out, [2]string{"humid", s.Humidity})
+	}
+	if s.Pressure != "" {
+		out = append(out, [2]string{"hPa", s.Pressure})
+	}
+	return out
+}
+
+func tileHasLabel(t Tile, label string) bool {
+	for _, p := range t.Pages {
+		for _, r := range p.Rows {
+			if r.Label == label {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (a *App) tempLines() [][2]string {
 	if a.Snap == nil {
 		return nil
@@ -570,7 +609,13 @@ func (a *App) tempLines() [][2]string {
 				name := ""
 				switch r.Label {
 				case "temp":
+					// The Pi temp row is the room sensor once a soc row exists.
+					if t.ID == "pi" && tileHasLabel(t, "soc") {
+						continue
+					}
 					name = shortName(t.Label)
+				case "soc":
+					name = "PI"
 				case "cpu temp":
 					name = "GPU cpu"
 				case "gpu temp":

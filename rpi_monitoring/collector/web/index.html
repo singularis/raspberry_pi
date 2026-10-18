@@ -68,9 +68,11 @@ function paint() {
   st.textContent = summary(snap);
   st.className = (snap.summary && snap.summary.crit) ? "crit" : (snap.summary && snap.summary.warn) ? "warn" : "ok";
   const bits = [];
-  if (snap.temp_out) bits.push(snap.temp_out);
-  if (snap.humidity) bits.push(snap.humidity);
-  if (snap.pressure) bits.push(snap.pressure + " hPa");
+  if (snap.temp_in) bits.push(snap.temp_in);
+  const sensor = snap.sensor || {};
+  if (sensor.humidity) bits.push(sensor.humidity);
+  if (sensor.pressure) bits.push(sensor.pressure + " hPa");
+  if (snap.temp_out) bits.push("out " + snap.temp_out);
   document.getElementById("temp").textContent = bits.join("   ");
   sections.innerHTML = "";
   (snap.tiles || []).forEach(function (t) {

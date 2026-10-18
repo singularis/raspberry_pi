@@ -522,6 +522,52 @@ def rec_off():
     _later_stop()
 
 
+def _wait_jpeg(wait_s):
+    deadline = time.monotonic() + wait_s
+    while True:
+        with _buf.ready:
+            fr = _buf.frame
+            if fr:
+                return bytes(fr)
+            remain = deadline - time.monotonic()
+            if remain <= 0:
+                return None
+            _buf.ready.wait(timeout=min(0.4, remain))
+
+
+def _tail_jpeg(path, tail=512 * 1024):
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            f.seek(max(0, size - tail))
+            data = f.read()
+    except OSError:
+        return None
+    end = data.rfind(b"\xff\xd9")
+    if end < 0:
+        return None
+    start = data.rfind(b"\xff\xd8", 0, end)
+    if start < 0:
+        return None
+    return data[start:end + 2]
+
+
+def _grab_jpeg():
+    if _rec() or _mode == "record":
+        return _tail_jpeg(_rec_path) if _rec_path else None
+    own = not _on
+    if own:
+        try:
+            cam_start("live")
+        except Exception as exc:
+            print("[cam] snap failed", exc, flush=True)
+            return None
+    fr = _wait_jpeg(3.0)
+    if own:
+        _later_stop()
+    return fr
+
+
 def _later_stop():
     global _idle
     if _rec() or _mode == "record":
@@ -705,6 +751,59 @@ def _clips_stat():
     return n, size
 
 
+def _iio_float(path):
+    raw = _read(path)
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _bme680():
+    """Bosch BME680 via the kernel IIO driver. No userspace sensor library.
+
+    Kernel 6.6 sysfs units: temperature millidegree C, humidity percent,
+    pressure kilopascal. A value that is already in the human unit is kept.
+    """
+    root = "/sys/bus/iio/devices"
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return None
+    base = None
+    for name in names:
+        path = os.path.join(root, name)
+        if _read(os.path.join(path, "name")) == "bme680":
+            base = path
+            break
+    if not base:
+        return None
+    temp = _iio_float(os.path.join(base, "in_temp_input"))
+    hum = _iio_float(os.path.join(base, "in_humidityrelative_input"))
+    press = _iio_float(os.path.join(base, "in_pressure_input"))
+    if temp is None and hum is None and press is None:
+        return None
+    if temp is not None and abs(temp) > 200:
+        temp /= 1000.0
+    if hum is not None and abs(hum) > 200:
+        hum /= 1000.0
+    if press is not None:
+        if press < 200:
+            press *= 10.0
+        elif press > 20000:
+            press /= 100.0
+    out = {}
+    if temp is not None:
+        out["temp_c"] = round(temp, 1)
+    if hum is not None:
+        out["humidity"] = round(hum, 1)
+    if press is not None:
+        out["pressure_hpa"] = round(press, 1)
+    return out or None
+
+
 def _health():
     temp_raw = _read("/sys/class/thermal/thermal_zone0/temp")
     temp = int(temp_raw) / 1000 if temp_raw and temp_raw.isdigit() else None
@@ -713,6 +812,7 @@ def _health():
     clips_n, clips_b = _clips_stat()
     return {
         "temp_c": temp,
+        "sensor": _bme680(),
         "ram_mb": total,
         "ram_free_mb": free,
         "sd_mb": disk_total,
@@ -775,6 +875,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self._json(_health())
             return
+        if path == "/sensor":
+            body = _bme680()
+            if not body:
+                self._json({"temp_c": None, "humidity": None, "pressure_hpa": None}, 503)
+                return
+            self._json(body)
+            return
+        if path == "/snap.jpg":
+            self._snap()
+            return
         if path == "/record":
             self._record(parse_qs(u.query).get("on", [None])[0])
             return
@@ -786,6 +896,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/clips":
             self._clips()
+            return
+        if path.startswith("/download/"):
+            self._clip_download(path[10:])
             return
         if path.startswith("/clip/"):
             self._clip_play(path[6:])
@@ -871,6 +984,7 @@ class Handler(BaseHTTPRequestHandler):
                     rows.append(
                         f'<div class="row"><button type="button" data-f="{name}">{name}'
                         f'<span>{datetime.fromtimestamp(st.st_mtime).strftime("%d %b %H:%M")} · {st.st_size/1048576:.1f} MB</span></button>'
+                        f'<a class="btn" href="/download/{name}">Save</a>'
                         f'<button type="button" class="del" data-f="{name}">Delete</button></div>'
                     )
         html = open(os.path.join(WEB, "clips.html"), encoding="utf-8").read()
@@ -890,6 +1004,44 @@ class Handler(BaseHTTPRequestHandler):
         if os.path.isfile(ts):
             os.unlink(ts)
         self._json({"ok": True, "file": os.path.basename(path)})
+
+    def _snap(self):
+        fr = _grab_jpeg()
+        if not fr:
+            self._send(503, b"no frame", "text/plain")
+            return
+        name = "pi-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".jpg"
+        self._send(200, fr, "image/jpeg", extra=(
+            ("Content-Disposition", 'attachment; filename="%s"' % name),
+        ))
+
+    def _clip_download(self, name):
+        path = _clip(name)
+        if not path:
+            self._send(404, b"not found", "text/plain")
+            return
+        try:
+            size = os.path.getsize(path)
+            fh = open(path, "rb")
+        except OSError:
+            self._send(404, b"not found", "text/plain")
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "video/x-motion-jpeg")
+        self.send_header("Content-Length", str(size))
+        self.send_header("Content-Disposition", 'attachment; filename="%s"' % os.path.basename(path))
+        self.send_header(*HDR)
+        self.end_headers()
+        try:
+            while True:
+                chunk = fh.read(65536)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            pass
+        finally:
+            fh.close()
 
     def _clip_play(self, name):
         path = _clip(name)

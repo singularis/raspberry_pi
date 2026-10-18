@@ -141,6 +141,40 @@ def test_protobuf_dish_count():
     assert dish_count(b"\x0a\x00\x0a\x00") == 2
 
 
+def test_room_sensor():
+    tiles = build({
+        "pi": {
+            "temp": 57,
+            "ram_free": 200,
+            "ram_mb": 428,
+            "sd_pct": 40,
+            "sensor": {"temp": 26.8, "hum": 37.8, "press": 1028.6},
+        },
+    })
+    pi = {t["id"]: t for t in tiles}["pi"]
+    assert pi["big"] == "27C"
+    assert pi["cap"] == "room"
+    assert pi["state"] == "ok"
+    rows = {r[0]: r for r in pi["pages"][0]["rows"]}
+    assert rows["temp"] == ["temp", "27C", "ok"]
+    assert rows["humid"][1] == "38%"
+    assert rows["hPa"] == ["hPa", "1029", "ok"]
+    assert rows["soc"] == ["soc", "57C", "ok"]
+    body = snap(
+        tiles,
+        weather={"temp": 16, "hum": 80, "press": 1016},
+        sensor={"temp": 26.8, "hum": 37.8, "press": 1028.6},
+    )
+    assert body["temp_out"] == "16°C"
+    assert body["temp_in"] == "27°C"
+    assert body["humidity"] == "80%"
+    assert body["sensor"] == {"temp": "27°C", "humidity": "38%", "pressure": "1029"}
+    plain = {t["id"]: t for t in build({"pi": {"temp": 47, "ram_free": 241, "sd_pct": 40}})}["pi"]
+    assert plain["cap"] == "cpu temp"
+    assert plain["big"] == "47C"
+    assert "humid" not in {r[0] for r in plain["pages"][0]["rows"]}
+
+
 def test_snap_and_jwt():
     tiles = build({})
     assert len(tiles) == 8

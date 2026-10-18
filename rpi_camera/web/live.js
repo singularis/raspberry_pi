@@ -22,4 +22,25 @@ document.getElementById('ref').onclick=function(e){
   e.preventDefault();
   fetch('/record').then(r=>r.json()).then(function(j){if(j&&j.recording)show(j);else liveOn();});
 };
+document.getElementById('dl').onclick=function(e){
+  e.preventDefault();
+  var note=document.getElementById('note');
+  note.textContent='saving';
+  fetch('/snap.jpg').then(function(r){
+    if(!r.ok)throw new Error('snap');
+    var name='pi.jpg';
+    var cd=r.headers.get('Content-Disposition')||'';
+    var m=cd.match(/filename="([^"]+)"/);
+    if(m)name=m[1];
+    return r.blob().then(function(b){return {b:b,name:name};});
+  }).then(function(got){
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(got.b);
+    a.download=got.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    if(!rec)note.textContent='';
+  }).catch(function(){note.textContent='no frame';});
+};
 fetch('/record').then(r=>r.json()).then(show);
