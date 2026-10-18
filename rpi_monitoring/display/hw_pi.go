@@ -35,7 +35,7 @@ func (p panel) cmd(c byte, args ...byte) {
 	}
 }
 
-func (p *panel) Blit(img *image.RGBA) {
+func (p *panel) Blit(img *image.RGBA, yield func()) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	p.cmd(0x2A, 0, 0, byte((w-1)>>8), byte(w-1))
@@ -59,14 +59,23 @@ func (p *panel) Blit(img *image.RGBA) {
 			buf[j+1] = byte(v)
 			j += 2
 		}
+		if yield != nil && y&31 == 31 {
+			yield()
+		}
 	}
 	const chunk = 4096
+	sent := 0
 	for i := 0; i < len(buf); i += chunk {
 		n := i + chunk
 		if n > len(buf) {
 			n = len(buf)
 		}
 		_ = p.spi.Tx(buf[i:n], nil)
+		sent++
+		// CS is already high between chunks. A touch read here does not reset RAMWR.
+		if yield != nil && sent&3 == 0 {
+			yield()
+		}
 	}
 }
 
@@ -85,15 +94,23 @@ type touchEv struct {
 }
 
 func (t *touchDev) Poll() (touchEv, bool) {
-	// One pressure read while idle. The full 5-sample median runs only after a touch.
-	if t.read(0xB0) <= 80 {
+	// PD=01 keeps the ADC on. PD=00 powers down between reads, and the next
+	// conversion is often junk, which dropped real taps.
+	hit := false
+	for i := 0; i < 3; i++ {
+		if t.read(0xB1) > 80 {
+			hit = true
+			break
+		}
+	}
+	if !hit {
 		return touchEv{}, false
 	}
 	var zs, xs, ys [5]int
 	for i := 0; i < 5; i++ {
-		zs[i] = t.read(0xB0)
-		xs[i] = t.read(0xD0)
-		ys[i] = t.read(0x90)
+		zs[i] = t.read(0xB1)
+		xs[i] = t.read(0xD1)
+		ys[i] = t.read(0x91)
 	}
 	if median5(zs) <= 80 {
 		return touchEv{}, false

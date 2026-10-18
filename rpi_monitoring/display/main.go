@@ -92,10 +92,10 @@ func runDevice(url string, refresh time.Duration) {
 	}
 	last := time.Now()
 	nextFetch := time.Now()
-	var downAt time.Time
-	var wasDown bool
-	var lx, ly int
+	var track pressTrack
 	failWait := 5 * time.Second
+	fetchCh := make(chan fetchResult, 1)
+	inFlight := false
 	for {
 		now = time.Now()
 		dt := now.Sub(last)
@@ -109,55 +109,102 @@ func runDevice(url string, refresh time.Duration) {
 		a.Now = now
 		a.advance(dt)
 		ev, ok := touch.Poll()
-		if ok && ev.Down {
-			lx, ly = ev.X, ev.Y
-			a.LastRaw = [2]int{ev.RawX, ev.RawY}
-			if !wasDown {
-				a.pointerDown(ev.X, ev.Y)
-				downAt = now
-			}
-			wasDown = true
-		} else if wasDown {
-			wasDown = false
-			if a.Screen == scrHome && now.Sub(downAt) >= 3*time.Second && a.hit(lx, ly) == "clock" {
-				a.holdClock(3 * time.Second)
-				saveCal(a)
-			} else {
-				a.pointerUp(lx, ly)
-			}
+		track.apply(a, ev, ok, now)
+		select {
+		case r := <-fetchCh:
+			inFlight = false
+			a.setSnap(r.s, r.err)
+			nextFetch, failWait = afterFetch(r.started, refresh, failWait, r.s, r.err)
+		default:
 		}
-		if now.After(nextFetch) {
-			s, err := fetchSnap(url)
-			a.setSnap(s, err)
-			if err != nil || s == nil {
-				nextFetch = now.Add(failWait)
-				switch {
-				case failWait < 10*time.Second:
-					failWait = 10 * time.Second
-				case failWait < 20*time.Second:
-					failWait = 20 * time.Second
-				default:
-					failWait = 30 * time.Second
-				}
-			} else {
-				failWait = 5 * time.Second
-				wait := refresh
-				if s.NextInS > 0 && s.NextInS < 120 {
-					wait = time.Duration(s.NextInS) * time.Second
-				}
-				nextFetch = now.Add(wait)
-			}
+		if !inFlight && !now.Before(nextFetch) {
+			inFlight = true
+			started := now
+			go func() {
+				s, err := fetchSnap(url)
+				fetchCh <- fetchResult{s: s, err: err, started: started}
+			}()
 		}
-		if a.dirty {
-			disp.Blit(a.Img)
+		// A redraw takes longer than a tap. Samples taken mid-blit are applied
+		// after, so paint never runs while the frame buffer is being copied.
+		var mid []touchEv
+		take := func() {
+			ev, ok := touch.Poll()
+			if !ok {
+				ev = touchEv{}
+			}
+			mid = append(mid, ev)
+		}
+		for pass := 0; pass < 2 && a.dirty; pass++ {
+			from := len(mid)
+			disp.Blit(a.Img, take)
 			a.dirty = false
+			for _, ev := range mid[from:] {
+				track.apply(a, ev, ev.Down, now)
+			}
 		}
-		if wasDown {
-			time.Sleep(20 * time.Millisecond)
+		if track.wasDown {
+			time.Sleep(16 * time.Millisecond)
 		} else {
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(40 * time.Millisecond)
 		}
 	}
+}
+
+type fetchResult struct {
+	s       *Snapshot
+	err     error
+	started time.Time
+}
+
+type pressTrack struct {
+	wasDown bool
+	downAt  time.Time
+	lx, ly  int
+}
+
+func (p *pressTrack) apply(a *App, ev touchEv, ok bool, now time.Time) {
+	if ok && ev.Down {
+		p.lx, p.ly = ev.X, ev.Y
+		a.LastRaw = [2]int{ev.RawX, ev.RawY}
+		if !p.wasDown {
+			a.pointerDown(ev.X, ev.Y)
+			p.downAt = now
+		}
+		p.wasDown = true
+		return
+	}
+	if !p.wasDown {
+		return
+	}
+	p.wasDown = false
+	if a.Screen == scrHome && now.Sub(p.downAt) >= 3*time.Second && a.hit(p.lx, p.ly) == "clock" {
+		a.holdClock(3 * time.Second)
+		saveCal(a)
+		return
+	}
+	a.pointerUp(p.lx, p.ly)
+}
+
+func afterFetch(started time.Time, refresh, failWait time.Duration, s *Snapshot, err error) (time.Time, time.Duration) {
+	if err != nil || s == nil {
+		wait := failWait
+		switch {
+		case failWait < 10*time.Second:
+			failWait = 10 * time.Second
+		case failWait < 20*time.Second:
+			failWait = 20 * time.Second
+		default:
+			failWait = 30 * time.Second
+		}
+		return started.Add(wait), failWait
+	}
+	failWait = 5 * time.Second
+	wait := refresh
+	if s.NextInS > 0 && s.NextInS < 120 {
+		wait = time.Duration(s.NextInS) * time.Second
+	}
+	return started.Add(wait), failWait
 }
 
 func actionURL(displayURL string) string {

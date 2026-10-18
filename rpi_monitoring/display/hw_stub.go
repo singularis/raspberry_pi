@@ -9,8 +9,8 @@ import (
 
 type panel struct{}
 
-func (panel) Blit(*image.RGBA) {}
-func (panel) Close()           {}
+func (panel) Blit(*image.RGBA, func()) {}
+func (panel) Close()                   {}
 
 type touchEv struct {
 	X, Y       int
