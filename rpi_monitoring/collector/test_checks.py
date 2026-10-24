@@ -137,6 +137,24 @@ def test_node_exporter(monkeypatch):
     assert round(fetch.node_metrics("racoon", "192.0.2.1")["cpu"]) == 25
 
 
+def test_weather_alert():
+    from model import temp_level, weather_alert
+    assert weather_alert(None) == ""
+    assert weather_alert(0) == ""
+    assert weather_alert(63) == "warn"
+    assert weather_alert(95) == "severe"
+    assert weather_alert(65) == "severe"
+    assert temp_level(26, 10, 16, 28, 32) == "ok"
+    assert temp_level(8, 10, 16, 28, 32) == "crit"
+    assert temp_level(14, 10, 16, 28, 32) == "warn"
+    assert temp_level(30, 10, 16, 28, 32) == "warn"
+    assert temp_level(34, 10, 16, 28, 32) == "crit"
+    hot = snap(build({}), weather={"temp": 33, "hum": 40, "press": 1010, "code": 95}, sensor={"temp": 12, "hum": 40, "press": 1010})
+    assert hot["weather_level"] == "crit"
+    assert hot["weather_alert"] == "severe"
+    assert hot["sensor"]["level"] == "warn"
+
+
 def test_protobuf_dish_count():
     assert dish_count(b"\x0a\x00\x0a\x00") == 2
 
@@ -160,7 +178,7 @@ def test_room_sensor():
     assert rows["temp"] == ["temp", "27C", "ok"]
     assert rows["humid"][1] == "38%"
     assert rows["hPa"] == ["hPa", "1029", "ok"]
-    assert rows["gas"] == ["gas", "1.9M", "ok"]
+    assert rows["gas"] == ["gas", "1.9 M\u03a9", "ok"]
     assert rows["soc"] == ["soc", "57C", "ok"]
     body = snap(
         tiles,
@@ -170,7 +188,9 @@ def test_room_sensor():
     assert body["temp_out"] == "16°C"
     assert body["temp_in"] == "27°C"
     assert body["humidity"] == "80%"
-    assert body["sensor"] == {"temp": "27°C", "humidity": "38%", "pressure": "1029", "gas": "1.9M"}
+    assert body["sensor"] == {"temp": "27°C", "humidity": "38%", "pressure": "1029", "gas": "1.9 M\u03a9", "level": "ok"}
+    assert body["weather_level"] == "ok"
+    assert body["weather_alert"] == ""
     plain = {t["id"]: t for t in build({"pi": {"temp": 47, "ram_free": 241, "sd_pct": 40}})}["pi"]
     assert plain["cap"] == "cpu temp"
     assert plain["big"] == "47C"

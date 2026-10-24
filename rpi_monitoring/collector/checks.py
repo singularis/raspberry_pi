@@ -424,10 +424,12 @@ def _temp_row(label, celsius, warn, crit):
 def _gas_row(ohms):
     n = float(ohms)
     if n >= 1_000_000:
-        return f"{n / 1_000_000:.1f}M"
-    if n >= 1000:
-        return str(int(round(n / 1000))) + "k"
-    return str(int(round(n)))
+        text = f"{n / 1_000_000:.1f} M"
+    elif n >= 1000:
+        text = str(int(round(n / 1000))) + " k"
+    else:
+        text = str(int(round(n))) + " "
+    return text + "\u03a9"
 
 
 def _hum_row(v):

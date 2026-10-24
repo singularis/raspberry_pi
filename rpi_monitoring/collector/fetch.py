@@ -883,7 +883,7 @@ def weather():
             params={
                 "latitude": 51.5072,
                 "longitude": -0.1276,
-                "current": "temperature_2m,relative_humidity_2m,surface_pressure",
+                "current": "temperature_2m,relative_humidity_2m,surface_pressure,weather_code",
                 "timezone": "Europe/London",
             },
             timeout=8,
@@ -894,6 +894,7 @@ def weather():
             "temp": float(cur["temperature_2m"]),
             "hum": float(cur["relative_humidity_2m"]),
             "press": float(cur["surface_pressure"]),
+            "code": cur.get("weather_code"),
         }
     except Exception:
         with _wx_mu:

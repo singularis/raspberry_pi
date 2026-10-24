@@ -10,10 +10,32 @@ def _round_text(v, suffix):
 def _gas_text(ohms):
     n = float(ohms)
     if n >= 1_000_000:
-        return f"{n / 1_000_000:.1f}M"
-    if n >= 1000:
-        return str(int(round(n / 1000))) + "k"
-    return str(int(round(n)))
+        text = f"{n / 1_000_000:.1f} M"
+    elif n >= 1000:
+        text = str(int(round(n / 1000))) + " k"
+    else:
+        text = str(int(round(n))) + " "
+    return text + "\u03a9"
+
+
+def temp_level(c, lo_c, lo_w, hi_w, hi_c):
+    if c <= lo_c or c >= hi_c:
+        return "crit"
+    if c <= lo_w or c >= hi_w:
+        return "warn"
+    return "ok"
+
+
+def weather_alert(code):
+    """WMO weather code. Severe is thunderstorm, heavy rain, or heavy snow."""
+    if code is None:
+        return ""
+    c = int(code)
+    if c in (65, 67, 75, 82, 86, 95, 96, 99):
+        return "severe"
+    if c in (45, 48, 55, 57, 63, 66, 71, 73, 81, 85):
+        return "warn"
+    return ""
 
 
 def snap(tiles, next_in_s=60, temp_out=None, weather=None, sensor=None):
@@ -40,6 +62,8 @@ def snap(tiles, next_in_s=60, temp_out=None, weather=None, sensor=None):
     temp = w.get("temp", temp_out)
     if temp is not None:
         body["temp_out"] = str(int(round(float(temp)))) + "\u00b0C"
+        body["weather_level"] = temp_level(float(temp), -2, 3, 27, 32)
+    body["weather_alert"] = weather_alert(w.get("code"))
     if w.get("hum") is not None:
         body["humidity"] = str(int(round(float(w["hum"])))) + "%"
     if w.get("press") is not None:
@@ -48,6 +72,7 @@ def snap(tiles, next_in_s=60, temp_out=None, weather=None, sensor=None):
     s = sensor or {}
     if s.get("temp") is not None:
         room["temp"] = _round_text(s["temp"], "\u00b0C")
+        room["level"] = temp_level(float(s["temp"]), 10, 16, 28, 32)
         body["temp_in"] = room["temp"]
     if s.get("hum") is not None:
         room["humidity"] = _round_text(s["hum"], "%")

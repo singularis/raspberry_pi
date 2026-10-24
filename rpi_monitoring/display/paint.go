@@ -136,7 +136,9 @@ func (a *App) paintHome(ink color.Color) {
 	}
 	if a.Toast == "" && a.Snap != nil && a.Snap.TempIn != "" {
 		tc := ink
-		if a.nightLook() {
+		if a.Snap.WeatherAlert == "severe" {
+			tc = metricInk("crit")
+		} else if a.nightLook() {
 			tc = nightInk()
 		}
 		a.put(a.F.sans14, a.Snap.TempIn, outTempRect(), tc, true)
@@ -533,21 +535,56 @@ func (a *App) paintTemp(ink color.Color) {
 	}
 	// Left column is two blocks: the room sensor, then the internet forecast.
 	a.put(a.F.sans14, "sensor", image.Rect(8, y, 160, y+hh), grey, false)
-	ly := a.paintMeter(a.sensorLines(), y+hh+2, stop)
+	ly := a.paintMeter(a.sensorLines(), sensorLevel(a), y+hh+2, stop)
 	ly += 6
 	if ly+hh < stop {
 		a.put(a.F.sans14, "weather", image.Rect(8, ly, 160, ly+hh), grey, false)
-		a.paintMeter(a.weatherLines(), ly+hh+2, stop)
+		a.paintMeter(a.weatherLines(), weatherLevel(a), ly+hh+2, stop)
 	}
 	a.paintLock()
 }
 
-func (a *App) paintMeter(lines [][2]string, y, stop int) int {
+func sensorLevel(a *App) string {
+	if a.Snap == nil || a.Snap.Sensor == nil {
+		return ""
+	}
+	return a.Snap.Sensor.Level
+}
+
+func weatherLevel(a *App) string {
+	if a.Snap == nil {
+		return ""
+	}
+	if a.Snap.WeatherAlert == "severe" || a.Snap.WeatherLevel == "crit" {
+		return "crit"
+	}
+	if a.Snap.WeatherAlert == "warn" || a.Snap.WeatherLevel == "warn" {
+		return "warn"
+	}
+	return ""
+}
+
+func levelInk(level string, normal color.Color) color.Color {
+	switch level {
+	case "warn":
+		return metricInk("warn")
+	case "crit", "severe":
+		return metricInk("crit")
+	default:
+		return normal
+	}
+}
+
+func (a *App) paintMeter(lines [][2]string, level string, y, stop int) int {
 	white := color.RGBA{255, 255, 255, 255}
-	temp, extra := "", ""
+	temp, extra, gas := "", "", ""
 	for _, ln := range lines {
 		if ln[0] == "temp" {
 			temp = ln[1]
+			continue
+		}
+		if ln[0] == "gas" {
+			gas = ln[1]
 			continue
 		}
 		if ln[1] == "" {
@@ -557,25 +594,26 @@ func (a *App) paintMeter(lines [][2]string, y, stop int) int {
 		if ln[0] == "hPa" {
 			bit += " hPa"
 		}
-		if ln[0] == "gas" {
-			bit = "gas " + bit
-		}
 		if extra != "" {
 			extra += "  "
 		}
 		extra += bit
 	}
-	if temp == "" && extra == "" {
+	if temp == "" && extra == "" && gas == "" {
 		return y
 	}
 	big := faceH(a.F.sans22) + 2
 	if temp != "" && y+big <= stop {
-		a.put(a.F.sans22, temp, image.Rect(8, y, 160, y+big), white, false)
+		a.put(a.F.sans22, temp, image.Rect(8, y, 160, y+big), levelInk(level, white), false)
 		y += big
 	}
 	small := faceH(a.F.sans14) + 2
 	if extra != "" && y+small <= stop {
 		a.put(a.F.sans14, extra, image.Rect(8, y, 160, y+small), white, false)
+		y += small
+	}
+	if gas != "" && y+small <= stop {
+		a.put(a.F.sans14, "gas "+gas, image.Rect(8, y, 160, y+small), white, false)
 		y += small
 	}
 	return y
