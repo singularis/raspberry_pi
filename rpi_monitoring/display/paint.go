@@ -309,8 +309,11 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 		pitch = 22
 	}
 	right := W - 8
-	btns := actionButtons(len(p.Actions))
-	if len(btns) > 0 {
+	btns := pageActionButtons(t.ID, len(p.Actions))
+	textStop := H - 2
+	if len(btns) > 0 && t.ID == "backup" {
+		textStop = btns[0].Min.Y - 4
+	} else if len(btns) > 0 {
 		right = btns[0].Min.X - 6
 	}
 	y := headerH + 2
@@ -322,7 +325,7 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 	}
 	n := 0
 	for _, row := range rows {
-		if n >= 9 || y >= H-2 {
+		if n >= 9 || y+pitch > textStop {
 			break
 		}
 		a.paintMetricRow(face, row, y, pitch, right, dual)
@@ -390,6 +393,10 @@ func (a *App) paintAction(r image.Rectangle, act Action) {
 	}
 	fill(a.Img, r, c)
 	white := color.RGBA{255, 255, 255, 255}
+	if r.Dy() < faceH(a.F.sans20)*2 {
+		a.put(a.F.sans14, act.Label, r.Inset(4), white, true)
+		return
+	}
 	lines := buttonLines(act.Label)
 	if len(lines) <= 1 {
 		label := ""
@@ -518,9 +525,9 @@ func (a *App) paintTemp(ink color.Color) {
 	grey := color.RGBA{156, 163, 175, 255}
 	a.put(a.F.sans22, "<", backRect(), white, true)
 	a.put(a.F.sans22, "TEMP", titleRect(), white, true)
-	y := headerH + 4
+	y := headerH + 1
 	hh := faceH(a.F.sans14)
-	stop := lockRect().Min.Y - 4
+	stop := lockRect().Min.Y - 2
 	// Right column stays the device list, same size and place as before.
 	a.put(a.F.sans14, "devices", image.Rect(168, y, W-8, y+hh), grey, false)
 	ry := y + hh + 6
@@ -535,8 +542,8 @@ func (a *App) paintTemp(ink color.Color) {
 	}
 	// Left column is two blocks: the room sensor, then the internet forecast.
 	a.put(a.F.sans14, "sensor", image.Rect(8, y, 160, y+hh), grey, false)
-	ly := a.paintMeter(a.sensorLines(), "sensor", y+hh+2, stop)
-	ly += 6
+	ly := a.paintMeter(a.sensorLines(), "sensor", y+hh+1, stop)
+	ly += 2
 	if ly+hh < stop {
 		a.put(a.F.sans14, "weather", image.Rect(8, ly, 160, ly+hh), grey, false)
 		a.paintMeter(a.weatherLines(), "weather", ly+hh+2, stop)
@@ -602,7 +609,7 @@ func levelInk(level string, normal color.Color) color.Color {
 
 func (a *App) paintMeter(lines [][2]string, kind string, y, stop int) int {
 	white := color.RGBA{255, 255, 255, 255}
-	lh := faceH(a.F.sans14) + 1
+	lh := faceH(a.F.sans14)
 	for _, ln := range lines {
 		if ln[1] == "" || y+lh > stop {
 			continue
@@ -683,7 +690,7 @@ func (a *App) tempLines() [][2]string {
 				case "soc":
 					name = "PI"
 				case "cpu temp":
-					name = "GPU cpu"
+					name = "CGPU"
 				case "gpu temp":
 					name = "GPU"
 				}
@@ -743,9 +750,12 @@ func (a *App) hit(x, y int) string {
 			return "start"
 		}
 	case scrDetail:
+		if p.In(lockHit()) {
+			return "lock"
+		}
 		if t := a.cur(); t != nil && a.Page < len(t.Pages) {
 			acts := t.Pages[a.Page].Actions
-			btns := actionButtons(len(acts))
+			btns := pageActionButtons(t.ID, len(acts))
 			for i, act := range acts {
 				if i >= len(btns) {
 					break

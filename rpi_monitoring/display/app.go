@@ -487,7 +487,7 @@ func (a *App) nearAction(id string, x, y int) bool {
 		return false
 	}
 	acts := t.Pages[a.Page].Actions
-	btns := actionButtons(len(acts))
+	btns := pageActionButtons(t.ID, len(acts))
 	for i, act := range acts {
 		if i >= len(btns) || act.ID != id[4:] {
 			continue

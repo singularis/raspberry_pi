@@ -58,11 +58,29 @@ func blankButton() image.Rectangle {
 
 // actionButtons is the right-hand column on a detail page, above the lock.
 func actionButtons(n int) []image.Rectangle {
+	return pageActionButtons("", n)
+}
+
+// pageActionButtons puts the backup actions under the text. Other pages keep the right column.
+func pageActionButtons(id string, n int) []image.Rectangle {
 	if n > 2 {
 		n = 2
 	}
 	if n < 1 {
 		return nil
+	}
+	if id == "backup" {
+		y1 := lockRect().Min.Y - 6
+		y0 := y1 - 46
+		gap := 8
+		x0, x1 := 8, W-8
+		w := (x1 - x0 - gap*(n-1)) / n
+		out := make([]image.Rectangle, n)
+		for i := 0; i < n; i++ {
+			x := x0 + i*(w+gap)
+			out[i] = image.Rect(x, y0, x+w, y1)
+		}
+		return out
 	}
 	x0, x1 := 222, W-6
 	y0 := headerH + 8
