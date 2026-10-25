@@ -127,7 +127,7 @@ func (a *App) paintHome(ink color.Color) {
 		}
 		a.put(a.F.sans14, a.Toast, r, ink, true)
 	} else {
-		a.put(a.F.sans14, a.Now.Format("15:04"), clockRect(), a.clockInk(ink), false)
+		a.put(a.F.sans14, a.Now.Format("15:04"), clockRect(), ink, false)
 		sum, sumCol := a.statusLine()
 		a.put(a.F.sans14, sum, statusSummaryRect(), sumCol, true)
 	}
@@ -136,7 +136,9 @@ func (a *App) paintHome(ink color.Color) {
 	}
 	if a.Toast == "" && a.Snap != nil && a.Snap.TempIn != "" {
 		tc := ink
-		if a.nightLook() {
+		if a.Snap.WeatherAlert == "severe" {
+			tc = metricInk("crit")
+		} else if a.nightLook() {
 			tc = nightInk()
 		}
 		a.put(a.F.sans14, a.Snap.TempIn, outTempRect(), tc, true)
@@ -553,16 +555,6 @@ func weatherLevel(a *App) string {
 		return "warn"
 	}
 	return ""
-}
-
-func (a *App) clockInk(normal color.Color) color.Color {
-	if a.Snap != nil && a.Snap.WeatherAlert == "severe" {
-		return metricInk("crit")
-	}
-	if a.nightLook() {
-		return nightInk()
-	}
-	return normal
 }
 
 func (a *App) meterLevel(kind, label string) string {
