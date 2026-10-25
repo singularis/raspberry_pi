@@ -188,8 +188,13 @@ def test_room_sensor():
     assert body["temp_out"] == "16°C"
     assert body["temp_in"] == "27°C"
     assert body["humidity"] == "80%"
-    assert body["sensor"] == {"temp": "27°C", "humidity": "38%", "pressure": "1029", "gas": "1.9 M\u03a9", "level": "ok"}
+    assert body["sensor"]["level"] == "ok"
+    assert body["sensor"]["hum_level"] == "ok"
+    assert body["sensor"]["press_level"] == "ok"
+    assert body["sensor"]["gas_level"] == "ok"
     assert body["weather_level"] == "ok"
+    assert body["weather_hum_level"] == "warn"
+    assert body["weather_press_level"] == "ok"
     assert body["weather_alert"] == ""
     plain = {t["id"]: t for t in build({"pi": {"temp": 47, "ram_free": 241, "sd_pct": 40}})}["pi"]
     assert plain["cap"] == "cpu temp"

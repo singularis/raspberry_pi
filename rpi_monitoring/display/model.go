@@ -12,8 +12,10 @@ type Snapshot struct {
 	TempIn        string  `json:"temp_in,omitempty"`
 	Humidity      string  `json:"humidity,omitempty"`
 	Pressure      string  `json:"pressure,omitempty"`
-	WeatherLevel  string  `json:"weather_level,omitempty"`
-	WeatherAlert  string  `json:"weather_alert,omitempty"`
+	WeatherLevel      string  `json:"weather_level,omitempty"`
+	WeatherAlert      string  `json:"weather_alert,omitempty"`
+	WeatherHumLevel   string  `json:"weather_hum_level,omitempty"`
+	WeatherPressLevel string  `json:"weather_press_level,omitempty"`
 	Sensor        *Sensor `json:"sensor,omitempty"`
 	Summary  struct {
 		Warn  int    `json:"warn"`
@@ -29,7 +31,10 @@ type Sensor struct {
 	Humidity string `json:"humidity,omitempty"`
 	Pressure string `json:"pressure,omitempty"`
 	Gas      string `json:"gas,omitempty"`
-	Level    string `json:"level,omitempty"`
+	Level      string `json:"level,omitempty"`
+	HumLevel   string `json:"hum_level,omitempty"`
+	PressLevel string `json:"press_level,omitempty"`
+	GasLevel   string `json:"gas_level,omitempty"`
 }
 
 type Tile struct {

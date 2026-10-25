@@ -127,7 +127,7 @@ func (a *App) paintHome(ink color.Color) {
 		}
 		a.put(a.F.sans14, a.Toast, r, ink, true)
 	} else {
-		a.put(a.F.sans14, a.Now.Format("15:04"), clockRect(), ink, false)
+		a.put(a.F.sans14, a.Now.Format("15:04"), clockRect(), a.clockInk(ink), false)
 		sum, sumCol := a.statusLine()
 		a.put(a.F.sans14, sum, statusSummaryRect(), sumCol, true)
 	}
@@ -136,9 +136,7 @@ func (a *App) paintHome(ink color.Color) {
 	}
 	if a.Toast == "" && a.Snap != nil && a.Snap.TempIn != "" {
 		tc := ink
-		if a.Snap.WeatherAlert == "severe" {
-			tc = metricInk("crit")
-		} else if a.nightLook() {
+		if a.nightLook() {
 			tc = nightInk()
 		}
 		a.put(a.F.sans14, a.Snap.TempIn, outTempRect(), tc, true)
@@ -535,20 +533,13 @@ func (a *App) paintTemp(ink color.Color) {
 	}
 	// Left column is two blocks: the room sensor, then the internet forecast.
 	a.put(a.F.sans14, "sensor", image.Rect(8, y, 160, y+hh), grey, false)
-	ly := a.paintMeter(a.sensorLines(), sensorLevel(a), y+hh+2, stop)
+	ly := a.paintMeter(a.sensorLines(), "sensor", y+hh+2, stop)
 	ly += 6
 	if ly+hh < stop {
 		a.put(a.F.sans14, "weather", image.Rect(8, ly, 160, ly+hh), grey, false)
-		a.paintMeter(a.weatherLines(), weatherLevel(a), ly+hh+2, stop)
+		a.paintMeter(a.weatherLines(), "weather", ly+hh+2, stop)
 	}
 	a.paintLock()
-}
-
-func sensorLevel(a *App) string {
-	if a.Snap == nil || a.Snap.Sensor == nil {
-		return ""
-	}
-	return a.Snap.Sensor.Level
 }
 
 func weatherLevel(a *App) string {
@@ -564,8 +555,50 @@ func weatherLevel(a *App) string {
 	return ""
 }
 
+func (a *App) clockInk(normal color.Color) color.Color {
+	if a.Snap != nil && a.Snap.WeatherAlert == "severe" {
+		return metricInk("crit")
+	}
+	if a.nightLook() {
+		return nightInk()
+	}
+	return normal
+}
+
+func (a *App) meterLevel(kind, label string) string {
+	if a.Snap == nil {
+		return ""
+	}
+	if kind == "sensor" && a.Snap.Sensor != nil {
+		s := a.Snap.Sensor
+		switch label {
+		case "temp":
+			return s.Level
+		case "humid":
+			return s.HumLevel
+		case "hPa":
+			return s.PressLevel
+		case "gas":
+			return s.GasLevel
+		}
+	}
+	if kind == "weather" {
+		switch label {
+		case "temp":
+			return weatherLevel(a)
+		case "humid":
+			return a.Snap.WeatherHumLevel
+		case "hPa":
+			return a.Snap.WeatherPressLevel
+		}
+	}
+	return ""
+}
+
 func levelInk(level string, normal color.Color) color.Color {
 	switch level {
+	case "ok":
+		return metricInk("ok")
 	case "warn":
 		return metricInk("warn")
 	case "crit", "severe":
@@ -575,46 +608,17 @@ func levelInk(level string, normal color.Color) color.Color {
 	}
 }
 
-func (a *App) paintMeter(lines [][2]string, level string, y, stop int) int {
+func (a *App) paintMeter(lines [][2]string, kind string, y, stop int) int {
 	white := color.RGBA{255, 255, 255, 255}
-	temp, extra, gas := "", "", ""
+	lh := faceH(a.F.sans14) + 1
 	for _, ln := range lines {
-		if ln[0] == "temp" {
-			temp = ln[1]
+		if ln[1] == "" || y+lh > stop {
 			continue
 		}
-		if ln[0] == "gas" {
-			gas = ln[1]
-			continue
-		}
-		if ln[1] == "" {
-			continue
-		}
-		bit := ln[1]
-		if ln[0] == "hPa" {
-			bit += " hPa"
-		}
-		if extra != "" {
-			extra += "  "
-		}
-		extra += bit
-	}
-	if temp == "" && extra == "" && gas == "" {
-		return y
-	}
-	big := faceH(a.F.sans22) + 2
-	if temp != "" && y+big <= stop {
-		a.put(a.F.sans22, temp, image.Rect(8, y, 160, y+big), levelInk(level, white), false)
-		y += big
-	}
-	small := faceH(a.F.sans14) + 2
-	if extra != "" && y+small <= stop {
-		a.put(a.F.sans14, extra, image.Rect(8, y, 160, y+small), white, false)
-		y += small
-	}
-	if gas != "" && y+small <= stop {
-		a.put(a.F.sans14, "gas "+gas, image.Rect(8, y, 160, y+small), white, false)
-		y += small
+		col := levelInk(a.meterLevel(kind, ln[0]), white)
+		a.put(a.F.sans14, ln[0], image.Rect(8, y, 52, y+lh), white, false)
+		a.put(a.F.sans14, ln[1], image.Rect(54, y, 160, y+lh), col, false)
+		y += lh
 	}
 	return y
 }
