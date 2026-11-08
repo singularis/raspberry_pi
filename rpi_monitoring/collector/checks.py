@@ -222,9 +222,22 @@ def _gpu_tile(gpu):
             states.append("crit")
         health = worst(*states) if states else "ok"
     else:
-        head = [_row("gpu temp", "--", "off"), _row("gpu vram", "--", "off"), _row("/ free", "--", "off")]
         rest = _off("cpu", "ram free", "gpu", "staging free", "cpu temp", "k8s")
-        health = "off"
+        if os_name == "windows" and gpu.get("temp") is not None:
+            vram = _vram_row(gpu)
+            vram[0] = "gpu vram"
+            if gpu.get("vram_free_mb") is None:
+                vram = _row("gpu vram", "--", "off")
+            head = [
+                _temp_row("gpu temp", gpu.get("temp"), 83, 90),
+                vram,
+                _row("/ free", "--", "off"),
+            ]
+            states = [row[2] for row in head if row[2] in ("ok", "warn", "crit")]
+            health = worst(*states) if states else "off"
+        else:
+            head = [_row("gpu temp", "--", "off"), _row("gpu vram", "--", "off"), _row("/ free", "--", "off")]
+            health = "off"
     mode_text, mode_state = _gpu_mode(os_name, phase, err)
     health_text = {"ok": "ok", "warn": "warn", "crit": "bad", "off": "off"}.get(health, health)
     page1 = head + [_row("mode", mode_text, mode_state), _row("health", health_text, health)]

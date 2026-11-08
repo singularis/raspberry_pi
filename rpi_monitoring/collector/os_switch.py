@@ -95,13 +95,16 @@ class Ops:
         """Part 2 script on the Windows box. No host configured yet returns noway."""
         if not WINDOWS:
             return "noway"
-        ok = _ssh_ok(WINDOWS, "powershell -NoProfile -File C:\\ops\\switch_to_linux.ps1")
+        ok = _ssh_ok(WINDOWS, "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\ops\\switch_to_linux.ps1")
         return "down" if ok else "fail"
 
     def windows_off(self):
         if not WINDOWS:
             return "noway"
-        ok = _ssh_ok(WINDOWS, "shutdown /s /t 30 /c \"GPU power off\"")
+        ok = _ssh_ok(
+            WINDOWS,
+            "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\ops\\poweroff.ps1",
+        )
         return "down" if ok else "fail"
 
     def remote(self, mode):
@@ -349,6 +352,7 @@ def snapshot(on):
         # One missed SSH must not paint a node Kubernetes still sees as off.
         if state == "off" and on and not probe["remembered"]:
             state = "linux"
+        _mark_node(state)
         return {
             "os": state,
             "os_phase": phase if (job or phase == "failed") else ("draining" if unit else ""),
@@ -373,6 +377,36 @@ def _remembered():
     if data.get("os_mode") or data.get("os_mode_at"):
         return data
     return dict(_mem)
+
+
+def _mark_node(state):
+    """Tell the lifecycle controller this NotReady GPU is Windows on purpose."""
+    mode = "windows" if state == "windows" else ""
+    token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    if not os.path.exists(token_path):
+        return
+    if getattr(_mark_node, "last", None) == mode:
+        return
+    try:
+        import httpx
+        token = open(token_path).read()
+        ca = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+        url = "https://kubernetes.default.svc/api/v1/nodes/racoon-gpu"
+        headers = {"Authorization": "Bearer " + token}
+        current = httpx.get(url, headers=headers, verify=ca, timeout=4)
+        if current.status_code != 200:
+            return
+        have = ((current.json().get("metadata") or {}).get("annotations") or {}).get("racoon/os-mode") or ""
+        if have == mode:
+            _mark_node.last = mode
+            return
+        patch = {"metadata": {"annotations": {"racoon/os-mode": mode or None}}}
+        headers["Content-Type"] = "application/merge-patch+json"
+        done = httpx.patch(url, headers=headers, verify=ca, json=patch, timeout=4)
+        if done.status_code in (200, 201):
+            _mark_node.last = mode
+    except Exception:
+        return
 
 
 def _remember(mode):

@@ -697,7 +697,10 @@ def assemble():
     }
     try:
         from os_switch import snapshot
-        out["gpu"].update(snapshot(on))
+        info = snapshot(on)
+        out["gpu"].update(info)
+        if info.get("os") == "windows":
+            out["gpu"].update(windows_nvidia())
     except Exception as exc:
         print("os snapshot failed", type(exc).__name__)
     return out
@@ -957,20 +960,74 @@ def _known_hosts():
     return "/tmp/known_hosts", "no"
 
 
+def _host_alias(target, known_path):
+    """Proxmox and Windows share 192.168.0.12. The alias picks the right host key."""
+    if not target or not known_path or not os.path.isfile(known_path):
+        return None
+    if target.startswith("singu@"):
+        name = "windows.gpu"
+    elif "192.168.0.12" in target:
+        name = "proxmox.gpu"
+    else:
+        return None
+    try:
+        text = open(known_path, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return None
+    if name not in text:
+        return None
+    return name
+
+
 def ssh_run(target, cmd, timeout=20):
     """One SSH command. Vault known_hosts turns strict checking on. Missing key returns None."""
     key = _gpu_key()
     if not key or not target:
         return None
     known, strict = _known_hosts()
+    argv = ["ssh", "-i", key, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=" + strict,
+            "-o", "UserKnownHostsFile=" + known, "-o", "ConnectTimeout=5"]
+    alias = _host_alias(target, known)
+    if alias:
+        argv.extend(["-o", "HostKeyAlias=" + alias])
+    argv.extend([target, cmd])
     try:
-        return subprocess.run(
-            ["ssh", "-i", key, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=" + strict,
-             "-o", "UserKnownHostsFile=" + known, "-o", "ConnectTimeout=5", target, cmd],
-            capture_output=True, text=True, timeout=timeout,
-        )
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except Exception:
         return None
+
+
+def windows_nvidia():
+    """GPU temp and VRAM from Windows. Empty when that host is not configured or down."""
+    target = os.environ.get("GPU_WINDOWS_SSH", "")
+    if not target:
+        return {}
+    result = ssh_run(
+        target,
+        "nvidia-smi --query-gpu=temperature.gpu,memory.free,memory.total --format=csv,noheader,nounits",
+        timeout=15,
+    )
+    if result is None or result.returncode != 0:
+        return {}
+    bits = [part.strip() for part in (result.stdout or "").split(",") if part.strip()]
+
+    def num(index):
+        try:
+            return float(bits[index])
+        except (IndexError, ValueError):
+            return None
+
+    temp = num(0)
+    free_mb = num(1)
+    total_mb = num(2)
+    out = {}
+    if temp is not None:
+        out["temp"] = temp
+    if free_mb is not None:
+        out["vram_free_mb"] = free_mb
+    if total_mb is not None:
+        out["vram_total_mb"] = total_mb
+    return out
 
 
 def _gpu_key():

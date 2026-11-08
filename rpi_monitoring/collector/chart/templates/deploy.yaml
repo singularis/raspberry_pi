@@ -48,6 +48,8 @@ spec:
               containerPort: 8010
               protocol: TCP
           env:
+            - name: GPU_WINDOWS_SSH
+              value: "singu@192.168.0.12"
             - name: POD_NAME
               valueFrom:
                 fieldRef:

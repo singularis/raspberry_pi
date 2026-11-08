@@ -95,6 +95,12 @@ def test_detail_pages():
     assert acts[0]["label"] == "ON" and acts[0]["color"] == "blue"
     assert acts[0]["confirm"]["verb"] == "On"
     assert acts[1]["color"] == "yellow" and acts[2]["color"] == "green"
+    win = build({"gpu": {"on": False, "os": "windows", "temp": 47, "vram_free_mb": 20000, "vram_total_mb": 24576}})
+    win = next(t for t in win if t["id"] == "gpu")
+    win_rows = win["pages"][0]["rows"]
+    assert win_rows[0] == ["gpu temp", "47C", "ok"]
+    assert win_rows[3][1] == "windows"
+    assert win["big"] == "WIN"
     assert by["backup"]["pages"][0]["actions"][0]["id"] == "wake"
     assert by["backup"]["pages"][0]["actions"][1]["id"] == "backup"
     assert by["backup"]["pages"][0]["rows"][0] == ["staging free", "off", "off"]
