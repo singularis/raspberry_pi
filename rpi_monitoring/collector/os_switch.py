@@ -44,11 +44,16 @@ def detect(probe):
     return "off"
 
 
+def host_down(probe):
+    """Nothing answers. A running power-off job must not count as the machine still being up."""
+    return not probe.get("linux") and not probe.get("proxmox") and not probe.get("windows") and not probe.get("ping")
+
+
 def reached(goal, probe):
     if goal == "linux":
         return bool(probe.get("linux"))
     if goal == "off":
-        return detect(probe) == "off"
+        return host_down(probe)
     if goal == "windows":
         if probe.get("linux") or probe.get("proxmox"):
             return False
@@ -284,7 +289,9 @@ def start(action):
             return True
     busy = (_remembered().get("job_phase") or "")
     if busy in ("starting", "rebooting", "draining", "waking", "retry", "poweroff"):
-        return True
+        # The box is already off. Windows or Linux should wake it, not sit behind the old power-off.
+        if not (busy == "poweroff" and action in ("os_windows", "os_linux")):
+            return True
     with _mu:
         if _job["running"]:
             return True
@@ -372,6 +379,16 @@ def snapshot(on):
         # One missed SSH must not paint a node Kubernetes still sees as off.
         if state == "off" and on and not probe["remembered"]:
             state = "linux"
+        # A power-off left behind by a dead collector must not keep the buttons locked
+        # once the box is dark.
+        with _mu:
+            local = _job["running"]
+        if not local and phase == "poweroff" and host_down(probe):
+            phase = ""
+            error = ""
+            job = False
+            state = "off"
+            _set(phase="", error="")
         _mark_node(state)
         return {
             "os": state,

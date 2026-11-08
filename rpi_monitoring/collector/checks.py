@@ -297,6 +297,10 @@ def _gpu_actions(os_name, phase, err=""):
     busy = phase in ("draining", "rebooting", "starting", "retry", "waking", "poweroff") or os_name == "switching"
     no_reply = err == "no reply"
     host_on = os_name in ("linux", "proxmox", "windows", "switching")
+    # Power off is a finished screen. Windows and Linux start the box from there.
+    boot = os_name == "off" or phase == "poweroff" or no_reply
+    if boot:
+        busy = False
     why_busy = "busy" if busy else ""
 
     def one(act_id, label, enabled, why, color, title, body, verb, current=False):

@@ -65,6 +65,11 @@ class Fake:
         self.remembered = mode or ""
 
 
+def test_poweroff_is_done_when_nothing_answers():
+    assert reached("off", {"job": True}) is True
+    assert reached("off", {"job": True, "ping": True}) is False
+
+
 def test_detect_order():
     assert detect({"linux": True, "proxmox": True}) == "linux"
     assert detect({"proxmox": True}) == "proxmox"

@@ -103,6 +103,8 @@ def test_detail_pages():
     assert down["l2"] != "busy"
     assert down["pages"][0]["actions"][0]["color"] == "grey"
     assert down["pages"][0]["actions"][0]["label"] == "OFF"
+    assert down["pages"][0]["actions"][1]["enabled"] is True
+    assert down["pages"][0]["actions"][2]["enabled"] is True
     quiet = build({"gpu": {"on": True, "os": "linux", "os_phase": "failed", "os_error": "no reply", "temp": 40}})
     quiet = next(t for t in quiet if t["id"] == "gpu")
     assert quiet["state"] == "off"
