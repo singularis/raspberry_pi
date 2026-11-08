@@ -77,6 +77,7 @@ type App struct {
 
 	Action   *Action
 	ArmedAt  time.Duration
+	OkHeld   bool
 	LocalCam func(on bool) error
 
 	NightFrom, NightTo int
@@ -125,6 +126,9 @@ func (a *App) advance(dt time.Duration) {
 	}
 	a.drainNotes()
 	a.refreshCam()
+	if a.Screen == scrConfirm && a.OkHeld && a.Mono >= a.ArmedAt {
+		a.sendConfirm()
+	}
 	a.ThemeNight = a.wantNight() && a.Mono > a.WakeUntil
 	if a.ThemeNight && a.Screen == scrHome && !a.Locked {
 		a.Screen = scrNight
@@ -163,9 +167,13 @@ func (a *App) viewSig() string {
 	if a.LastOK > 0 && a.Mono-a.LastOK >= staleAfter {
 		stale = "1"
 	}
-	return fmt.Sprintf("%s|%d|%d|%s|%v|%v|%v|%s|%s|%d|%v|%s|%s|%v|%d",
+	armed := "1"
+	if a.Screen == scrConfirm && a.Mono < a.ArmedAt {
+		armed = "0"
+	}
+	return fmt.Sprintf("%s|%d|%d|%s|%v|%v|%v|%s|%s|%d|%v|%s|%s|%v|%d|%s|%v",
 		a.Screen, a.Tile, a.Page, a.Toast, a.Down, a.ThemeNight, a.Locked,
-		a.Now.Format("15:04"), ts, a.CalStep, a.Press, tick, stale, a.CamOK, a.Dim)
+		a.Now.Format("15:04"), ts, a.CalStep, a.Press, tick, stale, a.CamOK, a.Dim, armed, a.OkHeld)
 }
 
 func (a *App) drainNotes() {
@@ -224,6 +232,7 @@ func (a *App) inNight() bool {
 
 func (a *App) goHome() {
 	a.Action = nil
+	a.OkHeld = false
 	if a.wantNight() && a.Mono > a.WakeUntil {
 		a.Screen = scrNight
 	} else {
@@ -500,23 +509,30 @@ func (a *App) nearAction(id string, x, y int) bool {
 func (a *App) confirmTap(id string) {
 	switch id {
 	case "cancel":
+		a.OkHeld = false
 		a.Action = nil
 		a.Screen = scrDetail
 	case "ok":
 		if a.Mono < a.ArmedAt {
+			a.OkHeld = true
 			return
 		}
-		id := ""
-		if a.Action != nil {
-			id = a.Action.ID
-		}
-		a.toast("sent")
-		a.Action = nil
-		a.Screen = scrDetail
-		a.FetchSoon = true
-		if id != "" && a.Post != nil {
-			go a.Post(id)
-		}
+		a.sendConfirm()
+	}
+}
+
+func (a *App) sendConfirm() {
+	a.OkHeld = false
+	id := ""
+	if a.Action != nil {
+		id = a.Action.ID
+	}
+	a.toast("sent")
+	a.Action = nil
+	a.Screen = scrDetail
+	a.FetchSoon = true
+	if id != "" && a.Post != nil {
+		go a.Post(id)
 	}
 }
 

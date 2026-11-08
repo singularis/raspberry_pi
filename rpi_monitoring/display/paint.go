@@ -459,7 +459,14 @@ func (a *App) paintAction(r image.Rectangle, act Action) {
 		if len(lines) == 1 {
 			label = lines[0]
 		}
-		a.put(a.F.sans20, label, r.Inset(4), white, true)
+		face := a.F.sans20
+		if font.MeasureString(face, label).Ceil() > r.Dx()-8 {
+			face = a.F.sans17
+		}
+		if font.MeasureString(face, label).Ceil() > r.Dx()-8 {
+			face = a.F.sans11
+		}
+		a.put(face, label, r.Inset(4), white, true)
 		return
 	}
 	h := faceH(a.F.sans20)
@@ -784,13 +791,16 @@ func (a *App) hit(x, y int) string {
 	case scrNight:
 		return "night"
 	case scrConfirm:
-		// Anything except OK leaves the dialog. A missed No used to trap the screen,
-		// because every tap restarted the five-second return home.
-		_, okb := confirmButtons()
+		// No leaves. A tap on the text stays, so a near miss does not throw the dialog away.
+		// Outside the panel still leaves. A missed No used to trap the screen.
+		cancel, okb := confirmButtons()
 		if p.In(okb) {
 			return "ok"
 		}
-		return "cancel"
+		if p.In(cancel) || !p.In(confirmPanel()) {
+			return "cancel"
+		}
+		return ""
 	case scrCamera:
 		if p.In(lockHit()) {
 			return "lock"

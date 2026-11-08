@@ -77,10 +77,12 @@ func pageActionButtons(id string, n int) []image.Rectangle {
 		// Same width as the lock. Fills the right side from under the page number down to the lock.
 		power := image.Rect(lock.Min.X, headerH+2, lock.Max.X, lock.Min.Y-gap)
 		// Linux stops before the lock corner, same corner as every other screen.
+		// The OS buttons fill the empty band above the lock row. A tap in that band used to miss.
 		corner := lockHit()
 		linuxW := 72
-		linux := image.Rect(corner.Min.X-gap-linuxW, lock.Min.Y, corner.Min.X-gap, lock.Max.Y)
-		windows := image.Rect(8, lock.Min.Y, linux.Min.X-gap, lock.Max.Y)
+		top := lock.Min.Y - 40
+		linux := image.Rect(corner.Min.X-gap-linuxW, top, corner.Min.X-gap, lock.Max.Y)
+		windows := image.Rect(8, top, linux.Min.X-gap, lock.Max.Y)
 		out := make([]image.Rectangle, n)
 		out[0] = power
 		if n > 1 {

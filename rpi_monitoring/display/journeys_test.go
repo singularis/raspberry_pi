@@ -66,6 +66,9 @@ func TestGpuButtonsStaySmall(t *testing.T) {
 	if a.hit(btns[2].Min.X+4, btns[2].Min.Y+4) != "act:os_linux" {
 		t.Fatal("linux")
 	}
+	if a.hit(80, 170) != "act:os_windows" {
+		t.Fatal("windows gap")
+	}
 	// The corner around the icon locks, same as the other screens.
 	if a.hit(250, 170) != "lock" {
 		t.Fatal("lock corner")
@@ -100,6 +103,36 @@ func TestGpuButtonsStaySmall(t *testing.T) {
 	tap(a, "act:gpu_power")
 	if a.Screen != scrConfirm {
 		t.Fatalf("power confirm %s", a.Screen)
+	}
+}
+
+func TestEarlyOkSendsWindows(t *testing.T) {
+	day := time.Date(2026, 9, 26, 15, 43, 0, 0, time.UTC)
+	a := boot(t, day, baseSnap())
+	tap(a, "tile:2")
+	tap(a, "act:os_windows")
+	if a.Screen != scrConfirm {
+		t.Fatalf("confirm %s", a.Screen)
+	}
+	_, okb := confirmButtons()
+	a.pointerDown(okb.Min.X+8, okb.Min.Y+8)
+	a.pointerUp(okb.Min.X+8, okb.Min.Y+8)
+	if a.Screen != scrConfirm || !a.OkHeld {
+		t.Fatal("early ok should wait")
+	}
+	got := make(chan string, 1)
+	a.Post = func(id string) { got <- id }
+	a.advance(time.Second)
+	if a.Screen != scrDetail || a.Toast != "sent" {
+		t.Fatalf("screen %s toast %s", a.Screen, a.Toast)
+	}
+	select {
+	case id := <-got:
+		if id != "os_windows" {
+			t.Fatalf("posted %s", id)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no post")
 	}
 }
 
