@@ -310,10 +310,16 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 		face = a.F.sans17
 		pitch = 22
 	}
+	left := 8
 	right := W - 8
 	btns := pageActionButtons(t.ID, len(p.Actions))
 	textStop := H - 2
-	if len(btns) > 0 && (t.ID == "backup" || t.ID == "gpu") {
+	if t.ID == "gpu" && len(btns) > 0 {
+		// The power button is the left column. Rows use the space to its right,
+		// down to the Windows / Linux row.
+		left = btns[0].Max.X + 4
+		textStop = lockRect().Min.Y - 4
+	} else if len(btns) > 0 && t.ID == "backup" {
 		top := btns[0].Min.Y
 		for _, b := range btns {
 			if b.Min.Y < top {
@@ -336,7 +342,7 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 		if n >= 9 || y+pitch > textStop {
 			break
 		}
-		a.paintMetricRow(face, row, y, pitch, right, dual)
+		a.paintMetricRow(face, row, y, pitch, left, right, dual)
 		y += pitch
 		n++
 	}
@@ -375,19 +381,23 @@ func hoistRow(rows []Row, label string) []Row {
 	return append(hit, rest...)
 }
 
-func (a *App) paintMetricRow(face font.Face, row Row, y, pitch, right int, dual bool) {
+func (a *App) paintMetricRow(face font.Face, row Row, y, pitch, left, right int, dual bool) {
 	x1 := right
 	lock := lockRect()
 	if y < lock.Max.Y && y+pitch > lock.Min.Y && x1 > lock.Min.X-4 {
 		x1 = lock.Min.X - 4
 	}
+	labelX1 := left + 110
+	if labelX1 > x1-40 {
+		labelX1 = left + (x1-left)/2
+	}
 	white := color.RGBA{255, 255, 255, 255}
 	if !dual {
-		a.put(face, row.Label, image.Rect(8, y, 118, y+pitch), white, false)
-		a.put(face, row.Value, image.Rect(122, y, x1, y+pitch), metricInk(row.State), false)
+		a.put(face, row.Label, image.Rect(left, y, labelX1, y+pitch), white, false)
+		a.put(face, row.Value, image.Rect(labelX1+4, y, x1, y+pitch), metricInk(row.State), false)
 		return
 	}
-	a.put(face, row.Label, image.Rect(8, y, dualLabelX1, y+pitch), white, false)
+	a.put(face, row.Label, image.Rect(left, y, dualLabelX1, y+pitch), white, false)
 	a.put(face, row.Value, image.Rect(dualNowX0, y, dualNowX1, y+pitch), metricInk(row.State), false)
 	if row.Value2 != "" && dualPrevX0 < x1 {
 		a.put(face, row.Value2, image.Rect(dualPrevX0, y, x1, y+pitch), metricInk(row.State2), false)
@@ -823,10 +833,17 @@ func (a *App) hit(x, y int) string {
 			return "lock"
 		}
 		// The drawn header is 34px. A finger lands below it.
-		if p.In(image.Rect(0, 0, 100, headerH+44)) {
+		// The drawn header is 34px. A finger lands below it.
+		// On the GPU screen the power button fills the left side under the header,
+		// so back stays inside the header there.
+		backH := headerH + 44
+		if t != nil && t.ID == "gpu" {
+			backH = headerH
+		}
+		if p.In(image.Rect(0, 0, 100, backH)) {
 			return "back"
 		}
-		if p.In(image.Rect(W-100, 0, W, headerH+44)) {
+		if p.In(image.Rect(W-100, 0, W, backH)) {
 			return "page"
 		}
 	case scrSettings:

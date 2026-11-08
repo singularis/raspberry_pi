@@ -240,6 +240,10 @@ def _gpu_tile(gpu):
     mode_text, mode_state = _gpu_mode(os_name, phase, err)
     health_text = {"ok": "ok", "warn": "warn", "crit": "bad", "off": "off"}.get(health, health)
     page1 = head + [_row("os", mode_text, mode_state), _row("health", health_text, health)]
+    if health in ("warn", "crit"):
+        why = _gpu_warn(head, rest, claw_ok, should, gpu.get("vllm"), gpu.get("vllm_late"), power)
+        if why:
+            page1.append(_row("warn", why, health))
     pages = [{"rows": page1, "actions": _gpu_actions(os_name, phase)}]
     # Linux rows stay off this tile while the box is in Windows.
     if os_name != "windows":
@@ -258,6 +262,15 @@ def _gpu_tile(gpu):
     if os_name == "switching":
         st = health if health != "off" else "busy"
     return tile("gpu", "GPU", st, big, l2=l2, l3=l3, pages=pages, os_name=os_name)
+
+
+def _gpu_warn(head, rest, claw_ok, should, vllm, vllm_late, power):
+    names = [row[0] for row in head + rest if row[2] in ("warn", "crit")]
+    if claw_ok is False:
+        names.append("claw")
+    if should and not vllm and vllm_late and power not in ("off", "starting"):
+        names.append("vllm")
+    return " ".join(names[:3])
 
 
 def _gpu_mode(os_name, phase, err):
@@ -405,9 +418,11 @@ def _backup_tile(bak):
         staging_row = _row("staging free", "off", "off")
     if arch_on:
         archive_row = _disk_row("archive", bak.get("archive_used_pct"), arch)
-    elif arch is not None:
+    elif arch is not None and bak.get("archive_is_free"):
         archive_row = _disk_row("archive", bak.get("archive_used_pct"), arch)
         archive_row[2] = "off"
+    elif arch is not None:
+        archive_row = _row("archive", _amt(arch), "off")
     else:
         archive_row = _row("archive", "--", "off")
     pages = [{"rows": [

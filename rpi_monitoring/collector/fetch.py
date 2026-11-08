@@ -597,13 +597,23 @@ def assemble():
     arch_pct = archive.get("percent_used") if arch_on else None
     # The archive disk is often unmounted. Keep the last size in the lease notes
     # (same store as the worker spark and the speed test) and show that instead of "idle".
+    archive_is_free = False
     if arch_free is not None:
         notes["archive_free_gb"] = arch_free
         if arch_pct is not None:
             notes["archive_used_pct"] = arch_pct
-    else:
+        archive_is_free = True
+    elif notes.get("archive_free_gb") is not None:
         arch_free = notes.get("archive_free_gb")
         arch_pct = notes.get("archive_used_pct")
+        archive_is_free = True
+    else:
+        arch_free = notes.get("archive_size_gb")
+        if arch_free is None:
+            arch_free = _last_archive_repo_gb()
+        if arch_free is not None:
+            notes["archive_size_gb"] = arch_free
+        arch_pct = None
     hole = pihole()
     down_mbps, up_mbps = speedtest(notes)
     _save_notes(notes)
@@ -672,6 +682,7 @@ def assemble():
             "archive_free_gb": arch_free,
             "archive_used_pct": arch_pct,
             "archive_mounted": arch_on,
+            "archive_is_free": archive_is_free,
         },
         "net": {
             "router": router,
@@ -704,6 +715,26 @@ def assemble():
     except Exception as exc:
         print("os snapshot failed", type(exc).__name__)
     return out
+
+
+def _last_archive_repo_gb():
+    """Last restic archive size from Backepr's run log, when the 12 TB disk is off."""
+    path = os.environ.get("BACKEPR_RUNS", "/var/lib/backepr/history/runs.jsonl")
+    if not os.path.isfile(path):
+        return None
+    last = None
+    try:
+        import json
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    last = json.loads(line)
+    except (OSError, ValueError):
+        return None
+    size = (last or {}).get("archive_repo_size")
+    if not size:
+        return None
+    return float(size) / (1024 ** 3)
 
 
 def storage_body(kind):

@@ -105,16 +105,20 @@ def test_detail_pages():
     assert win["os"] == "windows"
     assert win["big"] == "WIN"
     assert len(win["pages"]) == 1
+    warned = build({"gpu": {"on": True, "os": "linux", "temp": 88, "vllm": True, "claw_ok": True}})
+    warned = next(t for t in warned if t["id"] == "gpu")
+    warn_rows = warned["pages"][0]["rows"]
+    assert warn_rows[-1][0] == "warn"
+    assert "gpu temp" in warn_rows[-1][1]
     assert "k8s" not in {r[0] for r in win_rows}
     assert by["backup"]["pages"][0]["actions"][0]["id"] == "wake"
     assert by["backup"]["pages"][0]["actions"][1]["id"] == "backup"
     assert by["backup"]["pages"][0]["rows"][0] == ["staging free", "off", "off"]
     assert by["backup"]["pages"][0]["rows"][1][1] == "--"
-    remembered = build({"backup": {"archive_mounted": False, "archive_free_gb": 1400, "archive_used_pct": 48}})
+    remembered = build({"backup": {"archive_mounted": False, "archive_free_gb": 9400, "archive_is_free": False}})
     remembered = next(t for t in remembered if t["id"] == "backup")
     arch = remembered["pages"][0]["rows"][1]
-    assert arch[0] == "archive" and "idle" not in arch[1] and "1.4T" in arch[1]
-    assert arch[2] == "off"
+    assert arch[0] == "archive" and arch[1] == "9.2T" and arch[2] == "off"
     assert remembered["cap"].startswith("arc ")
     assert by["network"]["pages"][0]["rows"][0][0] == "ping"
     assert by["network"]["pages"][0]["rows"][2][0] == "pihole"
