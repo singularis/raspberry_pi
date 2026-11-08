@@ -315,9 +315,8 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 	btns := pageActionButtons(t.ID, len(p.Actions))
 	textStop := H - 2
 	if t.ID == "gpu" && len(btns) > 0 {
-		// The power button is the left column. Rows use the space to its right,
-		// down to the Windows / Linux row.
-		left = btns[0].Max.X + 4
+		// Power is the right column under the page number. Rows stay to its left.
+		right = btns[0].Min.X - 4
 		textStop = lockRect().Min.Y - 4
 	} else if len(btns) > 0 && t.ID == "backup" {
 		top := btns[0].Min.Y
@@ -808,7 +807,14 @@ func (a *App) hit(x, y int) string {
 	case scrDetail:
 		t := a.cur()
 		if t != nil && t.ID == "gpu" {
-			// Same corner as every other screen. It wins over Linux, which stops short of it.
+			// Power fills the lock's column above the icon. The corner beside the icon still locks.
+			if a.Page < len(t.Pages) {
+				acts := t.Pages[a.Page].Actions
+				btns := pageActionButtons(t.ID, len(acts))
+				if len(btns) > 0 && p.In(btns[0]) {
+					return "act:" + acts[0].ID
+				}
+			}
 			if p.In(lockHit()) {
 				return "lock"
 			}
@@ -840,9 +846,7 @@ func (a *App) hit(x, y int) string {
 			return "lock"
 		}
 		// The drawn header is 34px. A finger lands below it.
-		// The drawn header is 34px. A finger lands below it.
-		// On the GPU screen the power button fills the left side under the header,
-		// so back stays inside the header there.
+		// On the GPU screen the power button is under the page number, so that hit stays in the header.
 		backH := headerH + 44
 		if t != nil && t.ID == "gpu" {
 			backH = headerH
