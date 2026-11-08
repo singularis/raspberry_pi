@@ -184,7 +184,9 @@ def _gpu_tile(gpu):
     else:
         vllm_bit = "vllm " + ("up" if gpu.get("vllm") else "down")
     if os_name == "windows":
-        big, l2 = "WIN", "windows"
+        # The os row already says windows. The tile shows the temperature once.
+        big = _temp(gpu.get("temp")) if gpu.get("temp") is not None else "WIN"
+        l2 = (str(int(round(gpu.get("watts")))) + "W") if gpu.get("watts") is not None else ""
     elif os_name == "switching" or phase in ("draining", "rebooting", "starting", "retry", "waking", "poweroff"):
         big, l2 = "...", (err or phase or "switching")[:16]
     elif not show:
@@ -251,7 +253,7 @@ def _gpu_tile(gpu):
         if show and gpu.get("claw_lines"):
             pages.append({"rows": [_row("claw", ln, "warn" if claw_ok is False else "ok") for ln in gpu.get("claw_lines")[:4]]})
     if os_name == "windows":
-        l3 = (str(int(round(gpu.get("watts")))) + "W") if gpu.get("watts") is not None else "windows"
+        l3 = ""
     elif power == "off":
         l3 = "LLM off"
     elif power == "starting":

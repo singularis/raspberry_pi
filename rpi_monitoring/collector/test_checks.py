@@ -103,7 +103,9 @@ def test_detail_pages():
     assert win_rows[0] == ["gpu temp", "47C", "ok"]
     assert win_rows[2][1] == "windows"
     assert win["os"] == "windows"
-    assert win["big"] == "WIN"
+    assert win["big"] == "47C"
+    assert win["l2"] == ""
+    assert win["l3"] == ""
     assert len(win["pages"]) == 1
     warned = build({"gpu": {"on": True, "os": "linux", "temp": 88, "vllm": True, "claw_ok": True}})
     warned = next(t for t in warned if t["id"] == "gpu")

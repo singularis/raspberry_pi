@@ -315,7 +315,7 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 	btns := pageActionButtons(t.ID, len(p.Actions))
 	textStop := H - 2
 	if t.ID == "gpu" && len(btns) > 0 {
-		// Power is the right column under the page number. Rows stay to its left.
+		// Power is a lock-sized button on the lock. Rows stop above that row.
 		right = btns[0].Min.X - 4
 		textStop = lockRect().Min.Y - 4
 	} else if len(btns) > 0 && t.ID == "backup" {
@@ -823,7 +823,7 @@ func (a *App) hit(x, y int) string {
 	case scrDetail:
 		t := a.cur()
 		if t != nil && t.ID == "gpu" {
-			// Power fills the lock's column above the icon. The corner beside the icon still locks.
+			// Power is the lock-sized button above the icon. The corner beside the icon still locks.
 			if a.Page < len(t.Pages) {
 				acts := t.Pages[a.Page].Actions
 				btns := pageActionButtons(t.ID, len(acts))

@@ -85,7 +85,10 @@ function paint() {
     const h = document.createElement("h2");
     h.textContent = t.label || "";
     head.appendChild(h);
-    if (t.os) {
+    const osRow = (t.pages || []).some(function (page) {
+      return (page.rows || []).some(function (r) { return r && r[0] === "os"; });
+    });
+    if (t.os && !osRow) {
       const os = document.createElement("span");
       os.className = "os";
       os.textContent = t.os;

@@ -66,8 +66,8 @@ func TestGpuButtonsStaySmall(t *testing.T) {
 	if a.hit(btns[2].Min.X+4, btns[2].Min.Y+4) != "act:os_linux" {
 		t.Fatal("linux")
 	}
-	if a.hit(80, 170) != "act:os_windows" {
-		t.Fatal("windows gap")
+	if a.hit(80, 170) != "" {
+		t.Fatalf("above the lock row got %s", a.hit(80, 170))
 	}
 	// The corner around the icon locks, same as the other screens.
 	if a.hit(250, 170) != "lock" {
