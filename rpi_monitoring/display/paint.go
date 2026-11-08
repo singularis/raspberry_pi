@@ -444,7 +444,14 @@ func (a *App) paintAction(r image.Rectangle, act Action) {
 		return
 	}
 	if r.Dy() < faceH(a.F.sans20)*2 {
-		a.put(a.F.sans20, act.Label, r.Inset(2), white, true)
+		face := a.F.sans20
+		if font.MeasureString(face, act.Label).Ceil() > r.Dx()-4 {
+			face = a.F.sans17
+		}
+		if font.MeasureString(face, act.Label).Ceil() > r.Dx()-4 {
+			face = a.F.sans11
+		}
+		a.put(face, act.Label, r.Inset(2), white, true)
 		return
 	}
 	lines := buttonLines(act.Label)
@@ -801,7 +808,10 @@ func (a *App) hit(x, y int) string {
 	case scrDetail:
 		t := a.cur()
 		if t != nil && t.ID == "gpu" {
-			// The wide lock corner would cover Power and the right edge of Linux.
+			// Same corner as every other screen. It wins over Linux, which stops short of it.
+			if p.In(lockHit()) {
+				return "lock"
+			}
 			if a.Page < len(t.Pages) {
 				acts := t.Pages[a.Page].Actions
 				btns := pageActionButtons(t.ID, len(acts))
@@ -810,9 +820,6 @@ func (a *App) hit(x, y int) string {
 						return "act:" + act.ID
 					}
 				}
-			}
-			if p.In(lockRect()) {
-				return "lock"
 			}
 		} else if p.In(lockHit()) {
 			return "lock"

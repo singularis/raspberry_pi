@@ -76,8 +76,10 @@ func pageActionButtons(id string, n int) []image.Rectangle {
 		gap := 6
 		// Power is the full leftover height on the left. Windows and Linux stay on the lock row.
 		power := image.Rect(4, headerH+4, 52, H-4)
-		linuxW := 72
-		linux := image.Rect(lock.Min.X-gap-linuxW, lock.Min.Y, lock.Min.X-gap, lock.Max.Y)
+		// Stop Linux before the same corner the lock uses on every other screen.
+		corner := lockHit()
+		linuxW := 56
+		linux := image.Rect(corner.Min.X-gap-linuxW, lock.Min.Y, corner.Min.X-gap, lock.Max.Y)
 		windows := image.Rect(power.Max.X+gap, lock.Min.Y, linux.Min.X-gap, lock.Max.Y)
 		out := make([]image.Rectangle, n)
 		out[0] = power

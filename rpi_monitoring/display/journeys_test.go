@@ -66,12 +66,20 @@ func TestGpuButtonsStaySmall(t *testing.T) {
 	if a.hit(btns[2].Min.X+4, btns[2].Min.Y+4) != "act:os_linux" {
 		t.Fatal("linux")
 	}
-	// The old lock corner covers this point. It must not toggle the lock or a button.
-	if got := a.hit(250, 170); got != "" {
-		t.Fatalf("gap hit %s", got)
+	// The corner around the icon locks, same as the other screens.
+	if a.hit(250, 170) != "lock" {
+		t.Fatal("lock corner")
 	}
 	if a.hit(W-8, H-8) != "lock" {
 		t.Fatal("lock icon")
+	}
+	tap(a, "lock")
+	if !a.Locked {
+		t.Fatal("gpu lock")
+	}
+	tap(a, "lock")
+	if a.Locked {
+		t.Fatal("gpu unlock")
 	}
 	tap(a, "act:os_windows")
 	if a.Screen != scrConfirm {
