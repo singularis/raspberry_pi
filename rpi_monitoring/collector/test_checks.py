@@ -103,6 +103,12 @@ def test_detail_pages():
     assert down["l2"] != "busy"
     assert down["pages"][0]["actions"][0]["color"] == "grey"
     assert down["pages"][0]["actions"][0]["label"] == "OFF"
+    quiet = build({"gpu": {"on": True, "os": "linux", "os_phase": "failed", "os_error": "no reply", "temp": 40}})
+    quiet = next(t for t in quiet if t["id"] == "gpu")
+    assert quiet["state"] == "off"
+    os_row = next(r for r in quiet["pages"][0]["rows"] if r[0] == "os")
+    assert os_row[1] == "no reply" and os_row[2] == "off"
+    assert not any(a["current"] for a in quiet["pages"][0]["actions"])
     win = build({"gpu": {"on": False, "os": "windows", "temp": 47, "vram_free_mb": 20000, "vram_total_mb": 24576}})
     win = next(t for t in win if t["id"] == "gpu")
     win_rows = win["pages"][0]["rows"]

@@ -248,7 +248,7 @@ def _gpu_tile(gpu):
         why = _gpu_warn(head, rest, claw_ok, should, gpu.get("vllm"), gpu.get("vllm_late"), power)
         if why:
             page1.append(_row("warn", why, health))
-    pages = [{"rows": page1, "actions": _gpu_actions(os_name, phase)}]
+    pages = [{"rows": page1, "actions": _gpu_actions(os_name, phase, err)}]
     # Linux rows stay off this tile while the box is in Windows.
     if os_name != "windows":
         pages.append({"rows": rest})
@@ -265,7 +265,7 @@ def _gpu_tile(gpu):
     st = health if show or (os_name == "windows" and gpu.get("temp") is not None) else "off"
     if os_name == "switching" and phase != "poweroff":
         st = health if health != "off" else "busy"
-    if phase == "poweroff" or os_name == "off":
+    if phase == "poweroff" or os_name == "off" or err == "no reply":
         st = "off"
     return tile("gpu", "GPU", st, big, l2=l2, l3=l3, pages=pages, os_name=os_name)
 
@@ -280,6 +280,8 @@ def _gpu_warn(head, rest, claw_ok, should, vllm, vllm_late, power):
 
 
 def _gpu_mode(os_name, phase, err):
+    if err == "no reply":
+        return "no reply", "off"
     if err:
         return err[:16], "crit"
     if phase in ("draining", "rebooting", "starting", "retry", "waking", "poweroff"):
@@ -291,8 +293,9 @@ def _gpu_mode(os_name, phase, err):
     return "off", "off"
 
 
-def _gpu_actions(os_name, phase):
+def _gpu_actions(os_name, phase, err=""):
     busy = phase in ("draining", "rebooting", "starting", "retry", "waking", "poweroff") or os_name == "switching"
+    no_reply = err == "no reply"
     host_on = os_name in ("linux", "proxmox", "windows", "switching")
     why_busy = "busy" if busy else ""
 
@@ -320,13 +323,13 @@ def _gpu_actions(os_name, phase):
         "os_windows", "WINDOWS", (not busy) and os_name != "windows",
         why_busy or ("already windows" if os_name == "windows" else ""),
         "blue", "Switch to Windows?", "Drains the cluster and reboots into Windows.", "Windows",
-        current=os_name == "windows",
+        current=os_name == "windows" and not no_reply,
     )
     linux = one(
         "os_linux", "LINUX", (not busy) and os_name != "linux",
         why_busy or ("already linux" if os_name == "linux" else ""),
         "green", "Switch to Linux?", "Reboots into Proxmox and starts Linux.", "Linux",
-        current=os_name == "linux",
+        current=os_name == "linux" and not no_reply,
     )
     return [power, windows, linux]
 
