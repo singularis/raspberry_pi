@@ -71,7 +71,7 @@ Namespace `lcd-monitor`, LoadBalancer `192.168.0.124:8000` (pod listens on 8010,
 - MJPEG must be the hardware encoder (`/dev/video11`). The script waits for the device before importing Picamera2 and exits if Picamera2 picked the software one. `_close` stops the encoder before `close()`
 - Clips: `rpi_camera/recordings/` (gitignored). Clips page stops camera. Rec survives refresh
 - Service WorkingDirectory `rpi_camera/`, ExecStart `rpi_camera/stream_video.py`
-- http://192.168.0.89:8080/ — no AF motor on this module. Live page Save downloads one JPEG from `/snap.jpg`. Clips page Save downloads the `.mjpg` from `/download/<name>`. Clips page Stage uploads that clip and its `.ts` to `dante@192.168.1.5:/backup/main/pi_camera` (`~/.ssh/id_ed25519_staging`, key limited to `from="192.168.0.89"`), then deletes it on the Pi. Staging must be mounted. A failed upload leaves the clip on the Pi
+- http://192.168.0.89:8080/ — no AF motor on this module. Live page Save downloads one JPEG from `/snap.jpg`. Clips page Save downloads the `.mjpg` from `/download/<name>`. Clips page Upload starts a copy of that clip and its `.ts` to `dante@192.168.1.5:/backup/main/pi_camera` (`~/.ssh/id_ed25519_staging`, key limited to `from="192.168.0.89"`) and returns at once. The page polls `GET /stage`. The Pi deletes the clip only after the sizes match. Staging must be mounted. A failed upload leaves the clip on the Pi. Do not hold the POST open for the copy: a long clip leaves that socket idle and the phone drops it, which looked like a failed upload after the file had already moved
 
 ## WiFi watchdog
 

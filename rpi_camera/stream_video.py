@@ -7,12 +7,16 @@ libcamera-dev packages do not match the installed libcamera 0.3, so this
 stays on the Python binding that is already there.
 """
 
+import bisect
 import gc
 import json
 import os
 import selectors
+import shlex
 import struct
+import subprocess
 import sys
+import tarfile
 import threading
 import time
 from datetime import datetime
@@ -602,9 +606,137 @@ def _clip(name):
     return p if p.startswith(os.path.realpath(CLIPS) + os.sep) and os.path.isfile(p) else None
 
 
-def _jpegs(path):
+def _unlink_clip(path):
+    os.unlink(path)
+    for extra in (path[:-5] + ".ts", path[:-5] + ".idx"):
+        if os.path.isfile(extra):
+            os.unlink(extra)
+
+
+def _stage_target():
+    host = "dante@192.168.1.5"
+    dest = "/backup/main/pi_camera"
+    key = "/home/dante/.ssh/id_ed25519_staging"
+    cfg = os.path.join(os.path.dirname(HERE), "setting", "camera.json")
+    try:
+        with open(cfg, encoding="utf-8") as fh:
+            st = json.load(fh).get("staging") or {}
+        host = st.get("ssh") or host
+        dest = (st.get("dir") or dest).rstrip("/")
+        if st.get("key"):
+            key = os.path.expanduser(st["key"])
+    except (OSError, ValueError, TypeError):
+        pass
+    return host, dest, key
+
+
+def _ssh_argv():
+    host, _dest, key = _stage_target()
+    if not os.path.isfile(key):
+        raise OSError("no staging key")
+    return [
+        "ssh", "-i", key, "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
+        "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=8", host,
+    ]
+
+
+def _stage_put(path):
+    """Stream the clip to GPU staging in one SSH. Local files stay until sizes match."""
+    _host, dest, _key = _stage_target()
+    files = [path]
+    for extra in (path[:-5] + ".ts", path[:-5] + ".idx"):
+        if os.path.isfile(extra):
+            files.append(extra)
+    inc = dest + "/.incoming-" + str(os.getpid()) + "-" + os.path.basename(path)
+    checks, moves = [], []
+    for local in files:
+        name = os.path.basename(local)
+        src = shlex.quote(inc + "/" + name)
+        checks.append('[ "$(stat -c %s ' + src + ')" = "' + str(os.path.getsize(local)) + '" ]')
+        moves.append("mv -f " + src + " " + shlex.quote(dest + "/" + name))
+    cmd = "\n".join([
+        "inc=" + shlex.quote(inc),
+        "dest=" + shlex.quote(dest),
+        'cleanup() { rm -rf "$inc"; }',
+        "trap cleanup EXIT",
+        "mountpoint -q /backup/main || exit 2",
+        'mkdir -p "$dest" "$inc"',
+        'tar -C "$inc" -xf -',
+        " && ".join(checks) + " || exit 3",
+        " && ".join(moves),
+        'rmdir "$inc"',
+        "trap - EXIT",
+        "echo ok",
+    ])
+    r_fd, w_fd = os.pipe()
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            _ssh_argv() + [cmd], stdin=r_fd,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        os.close(r_fd)
+        r_fd = None
+        with os.fdopen(w_fd, "wb") as sink:
+            w_fd = None
+            with tarfile.open(fileobj=sink, mode="w|") as tar:
+                for local in files:
+                    tar.add(local, arcname=os.path.basename(local))
+        out, err_b = proc.communicate(timeout=7200)
+    except subprocess.TimeoutExpired:
+        if proc and proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+        return "staging timed out"
+    except Exception as exc:
+        if proc and proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+        print("[stage] ssh", exc, flush=True)
+        return "upload failed"
+    finally:
+        if r_fd is not None:
+            os.close(r_fd)
+        if w_fd is not None:
+            os.close(w_fd)
+    if proc.returncode == 0 and (out or b"").strip() == b"ok":
+        return None
+    note = (err_b or b"").decode("utf-8", "replace").strip()
+    if note:
+        print("[stage] ssh", proc.returncode, note[-300:], flush=True)
+    if proc.returncode == 2:
+        return "staging not mounted"
+    if proc.returncode == 255:
+        return "staging unreachable"
+    return "upload failed"
+
+
+def _stage_worker(name, path):
+    try:
+        err = _stage_put(path)
+    except subprocess.TimeoutExpired:
+        err = "staging timed out"
+    except OSError as exc:
+        print("[stage]", name, exc, flush=True)
+        err = "staging unreachable"
+    if not err and _rec_path and os.path.realpath(_rec_path) == os.path.realpath(path):
+        err = "uploaded, still recording"
+    if err:
+        print("[stage]", name, err, flush=True)
+        with _stage_lock:
+            _stage_jobs[name] = {"state": "error", "error": err}
+        return
+    _unlink_clip(path)
+    print("[stage]", name, "ok", flush=True)
+    with _stage_lock:
+        _stage_jobs[name] = {"state": "ok", "error": None}
+
+
+def _jpegs(path, start=0):
     buf = b""
     with open(path, "rb") as f:
+        if start:
+            f.seek(start)
         while True:
             chunk = f.read(65536)
             if not chunk:
@@ -623,14 +755,134 @@ def _jpegs(path):
                 buf = buf[b + 2:]
 
 
-def _play(path, wfile):
-    ts = path[:-5] + ".ts"
-    times = None
-    if os.path.isfile(ts):
-        data = open(ts, "rb").read()
-        times = [struct.unpack_from("<I", data, i * 4)[0] / 1000.0 for i in range(len(data) // 4)]
-    t0 = time.monotonic()
-    for i, fr in enumerate(_jpegs(path)):
+def _times(path):
+    try:
+        data = open(path[:-5] + ".ts", "rb").read()
+    except OSError:
+        return []
+    n = len(data) // 4
+    return [struct.unpack_from("<I", data, i * 4)[0] / 1000.0 for i in range(n)]
+
+
+def _clip_seconds(path):
+    times = _times(path)
+    return times[-1] if times else None
+
+
+_idx_lock = threading.Lock()
+_stage_lock = threading.Lock()
+_stage_jobs = {}
+
+
+def _scan_offsets(path):
+    offsets = []
+    with open(path, "rb") as f:
+        buf = b""
+        base = 0
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            buf += chunk
+            while True:
+                a = buf.find(b"\xff\xd8")
+                if a < 0:
+                    if len(buf) > 1:
+                        base += len(buf) - 1
+                        buf = buf[-1:]
+                    break
+                end = buf.find(b"\xff\xd9", a + 2)
+                if end < 0:
+                    base += a
+                    buf = buf[a:]
+                    break
+                offsets.append(base + a)
+                end += 2
+                base += end
+                buf = buf[end:]
+    return offsets
+
+
+def _offsets(path):
+    idx = path[:-5] + ".idx"
+    with _idx_lock:
+        try:
+            st = os.stat(path)
+            ist = os.stat(idx)
+            if ist.st_mtime >= st.st_mtime and ist.st_size >= 8 and ist.st_size % 8 == 0:
+                data = open(idx, "rb").read()
+                return [struct.unpack_from("<Q", data, i * 8)[0] for i in range(len(data) // 8)]
+        except OSError:
+            pass
+        offsets = _scan_offsets(path)
+        tmp = idx + ".tmp"
+        with open(tmp, "wb") as f:
+            for off in offsets:
+                f.write(struct.pack("<Q", off))
+        os.replace(tmp, idx)
+        return offsets
+
+
+def _seek_at(path, start_s):
+    times = _times(path)
+    if start_s <= 0:
+        return 0, 0, times
+    if times:
+        i = bisect.bisect_left(times, start_s)
+        if i >= len(times):
+            i = len(times) - 1
+    else:
+        i = int(start_s / 0.15)
+    if i <= 0:
+        return 0, 0, times
+    offsets = _offsets(path)
+    if not offsets:
+        return 0, 0, times
+    if i >= len(offsets):
+        i = len(offsets) - 1
+    return i, offsets[i], times
+
+
+def _when(text):
+    try:
+        t = float(text)
+    except (TypeError, ValueError):
+        return 0.0
+    if t != t or t < 0:
+        return 0.0
+    return t
+
+
+def _frame_at(path, start_s):
+    _i, off, _times_v = _seek_at(path, start_s)
+    buf = b""
+    with open(path, "rb") as f:
+        if off:
+            f.seek(off)
+        while len(buf) < 2 * 1024 * 1024:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            buf += chunk
+            a = buf.find(b"\xff\xd8")
+            if a < 0:
+                buf = buf[-1:]
+                continue
+            end = buf.find(b"\xff\xd9", a + 2)
+            if end >= 0:
+                return buf[a:end + 2]
+            buf = buf[a:]
+    return None
+
+
+def _play(path, wfile, start_s=0.0):
+    start_i, start_off, times = _seek_at(path, start_s)
+    if times and start_i < len(times):
+        base = times[start_i]
+    else:
+        base = start_i * 0.15
+    t0 = time.monotonic() - base
+    for i, fr in enumerate(_jpegs(path, start_off), start_i):
         if times and i < len(times):
             w = times[i] - (time.monotonic() - t0)
             if w > 0:
@@ -859,8 +1111,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header(*HDR)
         for item in extra:
             self.send_header(*item)
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            pass
 
     def _json(self, obj, code=200):
         self._send(code, json.dumps(obj), "application/json")
@@ -869,6 +1124,9 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path == "/delete":
             self._delete(parse_qs(u.query).get("f", [None])[0])
+            return
+        if u.path == "/stage":
+            self._stage(parse_qs(u.query).get("f", [None])[0])
             return
         self._send(404, b"not found", "text/plain")
 
@@ -900,11 +1158,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/clips":
             self._clips()
             return
+        if path == "/stage":
+            self._stage_status(parse_qs(u.query).get("f", [None])[0])
+            return
         if path.startswith("/download/"):
             self._clip_download(path[10:])
             return
         if path.startswith("/clip/"):
-            self._clip_play(path[6:])
+            self._clip_play(path[6:], u.query)
             return
         if path.startswith("/web/"):
             name = path[5:]
@@ -983,11 +1244,18 @@ class Handler(BaseHTTPRequestHandler):
         if os.path.isdir(CLIPS):
             for name in sorted(os.listdir(CLIPS), reverse=True):
                 if name.endswith(".mjpg"):
-                    st = os.stat(os.path.join(CLIPS, name))
+                    clip_path = os.path.join(CLIPS, name)
+                    st = os.stat(clip_path)
+                    dur = _clip_seconds(clip_path)
+                    dur_attr = f' data-d="{dur:.3f}"' if dur else ""
+                    with _stage_lock:
+                        busy = (_stage_jobs.get(name) or {}).get("state") == "uploading"
+                    up = ' disabled>...' if busy else '>Upload'
                     rows.append(
-                        f'<div class="row"><button type="button" data-f="{name}">{name}'
+                        f'<div class="row"><button type="button" data-f="{name}"{dur_attr}>{name}'
                         f'<span>{datetime.fromtimestamp(st.st_mtime).strftime("%d %b %H:%M")} · {st.st_size/1048576:.1f} MB</span></button>'
                         f'<a class="btn" href="/download/{name}">Save</a>'
+                        f'<button type="button" class="stage" data-f="{name}"{up}</button>'
                         f'<button type="button" class="del" data-f="{name}">Delete</button></div>'
                     )
         html = open(os.path.join(WEB, "clips.html"), encoding="utf-8").read()
@@ -1002,11 +1270,37 @@ class Handler(BaseHTTPRequestHandler):
         if _rec_path and os.path.realpath(_rec_path) == path:
             self._send(409, b"recording", "text/plain")
             return
-        os.unlink(path)
-        ts = path[:-5] + ".ts"
-        if os.path.isfile(ts):
-            os.unlink(ts)
+        _unlink_clip(path)
         self._json({"ok": True, "file": os.path.basename(path)})
+
+    def _stage_status(self, name):
+        with _stage_lock:
+            job = dict(_stage_jobs.get(name) or {})
+        if not job:
+            self._json({"state": "idle" if _clip(name) else "missing"})
+            return
+        self._json({"state": job["state"], "error": job.get("error")})
+
+    def _stage(self, name):
+        path = _clip(name)
+        if not path:
+            with _stage_lock:
+                done = (_stage_jobs.get(name) or {}).get("state") == "ok"
+            self._json({"state": "ok" if done else "missing"}, 200 if done else 404)
+            return
+        if _rec_path and os.path.realpath(_rec_path) == path:
+            self._json({"state": "error", "error": "recording"}, 409)
+            return
+        with _stage_lock:
+            job = _stage_jobs.get(name)
+            if job and job["state"] == "uploading":
+                self._json({"state": "uploading"}, 202)
+                return
+            _stage_jobs[name] = {"state": "uploading", "error": None}
+        threading.Thread(
+            target=_stage_worker, args=(os.path.basename(path), path), daemon=True,
+        ).start()
+        self._json({"state": "uploading"}, 202)
 
     def _snap(self):
         fr = _grab_jpeg()
@@ -1046,10 +1340,19 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             fh.close()
 
-    def _clip_play(self, name):
+    def _clip_play(self, name, query):
         path = _clip(name)
         if not path:
             self._send(404, b"not found", "text/plain")
+            return
+        qs = parse_qs(query)
+        start = _when(qs.get("t", ["0"])[0])
+        if qs.get("still", ["0"])[0] in ("1", "true"):
+            fr = _frame_at(path, start)
+            if not fr:
+                self._send(404, b"no frame", "text/plain")
+                return
+            self._send(200, fr, "image/jpeg")
             return
         self.send_response(200)
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
@@ -1057,7 +1360,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         try:
-            _play(path, self.wfile)
+            _play(path, self.wfile, start)
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
             pass
 

@@ -20,5 +20,10 @@
     "never": ["1920x1080 realloc", "3840x2160", "close+reopen for rec"]
   },
   "clips_dir": "rpi_camera/recordings",
-  "service": "flask_camera.service"
+  "service": "flask_camera.service",
+  "staging": {
+    "ssh": "dante@192.168.1.5",
+    "dir": "/backup/main/pi_camera",
+    "key": "/home/dante/.ssh/id_ed25519_staging"
+  }
 }

@@ -4,35 +4,157 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>Clips</title>
-<link rel="stylesheet" href="/web/style.css?v=save">
+<link rel="stylesheet" href="/web/style.css?v=stage3">
 </head>
 <body>
 <div id="top"><a class="btn" href="/">Live</a><span>Clips (camera off)</span></div>
-<div id="stage"><img id="p" alt=""></div>
+<div id="stage">
+<img id="p" alt="">
+<div id="scrub">
+<input id="seek" type="range" min="0" max="0" step="0.1" value="0" aria-label="Seek">
+<div id="clock"><span id="cur">0:00</span><span id="end">0:00</span></div>
+</div>
+</div>
 <div id="list">__LIST__</div>
 <script>
+var file=null,dur=0,at=0,t0=0,timer=null,drag=false,hold=null,wheelEnd=null,gen=0;
+function fmt(s){
+  s=Math.max(0,Math.round(s));
+  var m=(s/60)|0,r=s%60;
+  return m+':'+(r<10?'0':'')+r;
+}
+function clock(t,fromSeek){
+  document.getElementById('cur').textContent=fmt(t);
+  document.getElementById('end').textContent=fmt(dur);
+  var seek=document.getElementById('seek');
+  seek.style.setProperty('--pct',(dur?Math.max(0,Math.min(100,t/dur*100)):0)+'%');
+  if(!fromSeek)seek.value=String(t);
+}
+function stopTick(){if(timer){clearInterval(timer);timer=null;}}
+function play(t){
+  if(!file)return;
+  t=Math.max(0,dur?Math.min(dur,t):t);
+  at=t;t0=Date.now()/1000-t;gen++;drag=false;
+  clock(t);
+  document.getElementById('p').src='/clip/'+encodeURIComponent(file)+'?t='+t.toFixed(2)+'&r='+Date.now();
+  stopTick();
+  var g=gen;
+  timer=setInterval(function(){
+    if(drag||g!==gen)return;
+    var now=Date.now()/1000-t0;
+    if(dur&&now>=dur){now=dur;at=now;clock(now);stopTick();return;}
+    at=now;clock(now);
+  },200);
+}
+function preview(t,fromSeek){
+  t=Math.max(0,Math.min(dur,t));
+  at=t;clock(t,fromSeek);
+  clearTimeout(hold);
+  hold=setTimeout(function(){
+    document.getElementById('p').src='/clip/'+encodeURIComponent(file)+'?still=1&t='+t.toFixed(2)+'&r='+Date.now();
+  },70);
+}
+var seek=document.getElementById('seek');
+seek.addEventListener('input',function(){drag=true;stopTick();preview(parseFloat(seek.value)||0,true);});
+seek.addEventListener('change',function(){play(parseFloat(seek.value)||0);});
+document.getElementById('stage').addEventListener('wheel',function(e){
+  if(!file||!dur)return;
+  e.preventDefault();
+  var dir=(e.deltaY||e.deltaX)>0?2:-2;
+  drag=true;stopTick();
+  preview(at+dir);
+  clearTimeout(wheelEnd);
+  wheelEnd=setTimeout(function(){play(at);},280);
+},{passive:false});
+function watch(stage){
+  var name=stage.getAttribute('data-f');
+  stage.disabled=true;
+  stage.textContent='...';
+  function poll(){
+    fetch('/stage?f='+encodeURIComponent(name)).then(function(r){
+      return r.json().catch(function(){return {};});
+    }).then(function(j){
+      if(j.state==='ok'||j.state==='missing'){gone(name,stage.closest('.row'));return;}
+      if(j.state==='idle'){
+        stage.disabled=false;
+        stage.textContent='Upload';
+        return;
+      }
+      if(j.state==='error'){
+        stage.disabled=false;
+        stage.textContent='Upload';
+        alert(j.error||'upload failed');
+        return;
+      }
+      setTimeout(poll,3000);
+    }).catch(function(){setTimeout(poll,3000);});
+  }
+  setTimeout(poll,3000);
+}
+document.querySelectorAll('button.stage[disabled]').forEach(watch);
+function gone(name,row){
+  if(row)row.remove();
+  var p=document.getElementById('p');
+  if((p.getAttribute('src')||'').indexOf(encodeURIComponent(name))>=0){
+    p.removeAttribute('src');
+    file=null;dur=0;drag=false;stopTick();
+    document.getElementById('scrub').className='';
+  }
+  if(!document.querySelector('#list .row')){
+    var empty=document.createElement('p');
+    empty.className='empty';
+    empty.textContent='No clips yet';
+    document.getElementById('list').appendChild(empty);
+  }
+}
 document.getElementById('list').onclick=function(e){
   var del=e.target.closest('button.del');
   if(del){
     var name=del.getAttribute('data-f');
-    var row=del.closest('.row');
     fetch('/delete?f='+encodeURIComponent(name),{method:'POST'}).then(function(r){
-      if(!r.ok)return;
-      if(row)row.remove();
-      var p=document.getElementById('p');
-      if((p.getAttribute('src')||'').indexOf(encodeURIComponent(name))>=0)p.removeAttribute('src');
-      if(!document.querySelector('#list .row')){
-        var empty=document.createElement('p');
-        empty.className='empty';
-        empty.textContent='No clips yet';
-        document.getElementById('list').appendChild(empty);
+      if(r.ok)gone(name,del.closest('.row'));
+    });
+    return;
+  }
+  var stage=e.target.closest('button.stage');
+  if(stage){
+    var name=stage.getAttribute('data-f');
+    if(stage.disabled)return;
+    if(!confirm('Upload '+name+' to staging and remove it from the Pi?'))return;
+    stage.disabled=true;
+    stage.textContent='...';
+    fetch('/stage?f='+encodeURIComponent(name),{method:'POST'}).then(function(r){
+      return r.json().catch(function(){return {};}).then(function(j){return {ok:r.ok,j:j};});
+    }).then(function(res){
+      if(!res.ok||res.j.state==='error'||res.j.state==='missing'){
+        stage.disabled=false;
+        stage.textContent='Upload';
+        alert((res.j&&res.j.error)||'upload failed');
+        return;
       }
+      watch(stage);
+    }).catch(function(){
+      stage.disabled=false;
+      stage.textContent='Upload';
+      alert('upload failed');
     });
     return;
   }
   var b=e.target.closest('button[data-f]');
   if(!b)return;
-  document.getElementById('p').src='/clip/'+encodeURIComponent(b.getAttribute('data-f'));
+  file=b.getAttribute('data-f');
+  dur=parseFloat(b.getAttribute('data-d'))||0;
+  var scrub=document.getElementById('scrub');
+  if(dur>0){
+    scrub.className='on';
+    seek.max=String(dur);
+    seek.step=dur>300?'0.5':'0.1';
+    play(0);
+  }else{
+    scrub.className='';
+    stopTick();
+    document.getElementById('p').src='/clip/'+encodeURIComponent(file);
+  }
 };
 </script>
 </body>
