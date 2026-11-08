@@ -315,7 +315,7 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 	btns := pageActionButtons(t.ID, len(p.Actions))
 	textStop := H - 2
 	if t.ID == "gpu" && len(btns) > 0 {
-		// Power is a lock-sized button on the lock. Rows stop above that row.
+		// Power is the right column. Rows stay to its left, above the lock row.
 		right = btns[0].Min.X - 4
 		textStop = lockRect().Min.Y - 4
 	} else if len(btns) > 0 && t.ID == "backup" {
@@ -423,6 +423,8 @@ func actionFill(act Action) color.RGBA {
 		return dayFill("crit")
 	case "blue":
 		return dayFill("busy")
+	case "grey":
+		return dayFill("off")
 	default:
 		if !act.Enabled {
 			return dayFill("off")
@@ -438,46 +440,31 @@ func (a *App) paintAction(r image.Rectangle, act Action) {
 		border(a.Img, r, color.RGBA{255, 255, 255, 255})
 	}
 	white := color.RGBA{255, 255, 255, 255}
-	if r.Dx() < 56 {
-		a.put(a.F.sans11, act.Label, r.Inset(1), white, true)
-		return
-	}
-	if r.Dy() < faceH(a.F.sans20)*2 {
-		face := a.F.sans20
-		if font.MeasureString(face, act.Label).Ceil() > r.Dx()-4 {
-			face = a.F.sans17
-		}
-		if font.MeasureString(face, act.Label).Ceil() > r.Dx()-4 {
-			face = a.F.sans11
-		}
+	face := a.actionFace(act.Label, r.Dx()-8)
+	lines := buttonLines(act.Label)
+	if r.Dy() < faceH(a.F.sans20)*2 || len(lines) <= 1 {
 		a.put(face, act.Label, r.Inset(2), white, true)
 		return
 	}
-	lines := buttonLines(act.Label)
-	if len(lines) <= 1 {
-		label := ""
-		if len(lines) == 1 {
-			label = lines[0]
-		}
-		face := a.F.sans20
-		if font.MeasureString(face, label).Ceil() > r.Dx()-8 {
-			face = a.F.sans17
-		}
-		if font.MeasureString(face, label).Ceil() > r.Dx()-8 {
-			face = a.F.sans11
-		}
-		a.put(face, label, r.Inset(4), white, true)
-		return
-	}
-	h := faceH(a.F.sans20)
+	h := faceH(face)
 	total := h*2 + 2
 	y := r.Min.Y + (r.Dy()-total)/2
 	if y < r.Min.Y {
 		y = r.Min.Y
 	}
-	a.put(a.F.sans20, lines[0], image.Rect(r.Min.X+4, y, r.Max.X-4, y+h), white, true)
+	a.put(face, lines[0], image.Rect(r.Min.X+4, y, r.Max.X-4, y+h), white, true)
 	y += h + 2
-	a.put(a.F.sans20, lines[1], image.Rect(r.Min.X+4, y, r.Max.X-4, y+h), white, true)
+	a.put(face, lines[1], image.Rect(r.Min.X+4, y, r.Max.X-4, y+h), white, true)
+}
+
+func (a *App) actionFace(label string, width int) font.Face {
+	// One size for every button that can hold the word. Windows and Linux stay matched.
+	for _, face := range []font.Face{a.F.sans17, a.F.sans11} {
+		if font.MeasureString(face, label).Ceil() <= width {
+			return face
+		}
+	}
+	return a.F.sans11
 }
 
 func buttonLines(label string) []string {

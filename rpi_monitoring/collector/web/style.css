@@ -119,6 +119,7 @@ h1.crit { color: var(--crit); }
 .actions button.green { background: #15803d; color: #fff; }
 .actions button.red { background: #b91c1c; color: #fff; }
 .actions button.blue { background: #1d4ed8; color: #fff; }
+.actions button.grey { background: #4b5563; color: #fff; }
 .actions button.current { outline: 2px solid #fff; outline-offset: 1px; }
 .note:empty { display: none; }
 .note { margin: 6px 0 0; color: var(--muted); }

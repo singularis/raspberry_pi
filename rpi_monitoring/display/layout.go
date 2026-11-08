@@ -74,16 +74,16 @@ func pageActionButtons(id string, n int) []image.Rectangle {
 		}
 		lock := lockRect()
 		gap := 6
-		// Same size as the lock, sitting on it. The OS buttons match that height.
-		power := image.Rect(lock.Min.X, lock.Min.Y-gap-lock.Dy(), lock.Max.X, lock.Min.Y-gap)
+		// Power is the lock's column, from under the page number down to the lock.
+		power := image.Rect(lock.Min.X, headerH+2, lock.Max.X, lock.Min.Y-gap)
+		// Windows and Linux share the lock row, in proportion to the words, and stop before the lock corner.
 		corner := lockHit()
-		linuxW := 74
-		winW := 96
-		linux := image.Rect(corner.Min.X-gap-linuxW, lock.Min.Y, corner.Min.X-gap, lock.Max.Y)
-		windows := image.Rect(8, lock.Min.Y, 8+winW, lock.Max.Y)
-		if windows.Max.X > linux.Min.X-gap {
-			windows.Max.X = linux.Min.X - gap
-		}
+		rowLeft := 8
+		rowRight := corner.Min.X - gap
+		usable := rowRight - rowLeft - gap
+		winW := usable * 7 / 12
+		windows := image.Rect(rowLeft, lock.Min.Y, rowLeft+winW, lock.Max.Y)
+		linux := image.Rect(windows.Max.X+gap, lock.Min.Y, rowRight, lock.Max.Y)
 		out := make([]image.Rectangle, n)
 		out[0] = power
 		if n > 1 {

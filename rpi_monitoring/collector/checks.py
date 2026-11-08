@@ -187,7 +187,9 @@ def _gpu_tile(gpu):
         # The os row already says windows. The tile shows the temperature once.
         big = _temp(gpu.get("temp")) if gpu.get("temp") is not None else "WIN"
         l2 = (str(int(round(gpu.get("watts")))) + "W") if gpu.get("watts") is not None else ""
-    elif os_name == "switching" or phase in ("draining", "rebooting", "starting", "retry", "waking", "poweroff"):
+    elif phase == "poweroff" or os_name == "off":
+        big, l2 = "OFF", ""
+    elif os_name == "switching" or phase in ("draining", "rebooting", "starting", "retry", "waking"):
         big, l2 = "...", (err or phase or "switching")[:16]
     elif not show:
         big, l2 = "OFF", "since " + (gpu.get("off_since") or "--")
@@ -261,8 +263,10 @@ def _gpu_tile(gpu):
     else:
         l3 = "openclaw " + ("ok" if claw_ok else "warn" if claw_ok is False else "--")
     st = health if show or (os_name == "windows" and gpu.get("temp") is not None) else "off"
-    if os_name == "switching":
+    if os_name == "switching" and phase != "poweroff":
         st = health if health != "off" else "busy"
+    if phase == "poweroff" or os_name == "off":
+        st = "off"
     return tile("gpu", "GPU", st, big, l2=l2, l3=l3, pages=pages, os_name=os_name)
 
 
@@ -303,16 +307,19 @@ def _gpu_actions(os_name, phase):
             "confirm": {"title": title, "body": body, "verb": verb},
         }
 
-    if host_on:
+    if host_on and phase != "poweroff":
         power = one("gpu_power", "OFF", not busy, why_busy, "red",
                     "Power off GPU?", "Drains the cluster, then shuts the host down.", "Off")
+    elif host_on:
+        power = one("gpu_power", "OFF", False, "", "grey",
+                    "Power off GPU?", "Drains the cluster, then shuts the host down.", "Off")
     else:
-        power = one("gpu_power", "ON", not busy, why_busy, "blue",
+        power = one("gpu_power", "ON", not busy, "", "grey",
                     "Power on GPU?", "Wake-on-LAN. Proxmox starts Linux.", "On")
     windows = one(
         "os_windows", "WINDOWS", (not busy) and os_name != "windows",
         why_busy or ("already windows" if os_name == "windows" else ""),
-        "yellow", "Switch to Windows?", "Drains the cluster and reboots into Windows.", "Windows",
+        "blue", "Switch to Windows?", "Drains the cluster and reboots into Windows.", "Windows",
         current=os_name == "windows",
     )
     linux = one(

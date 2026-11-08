@@ -460,7 +460,9 @@ func (a *App) startAction(id string) {
 			continue
 		}
 		if !act.Enabled {
-			a.toast(act.Why)
+			if act.Why != "" {
+				a.toast(act.Why)
+			}
 			return
 		}
 		if act.ID == "wake" {

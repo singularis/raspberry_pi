@@ -93,9 +93,16 @@ def test_detail_pages():
     assert gpu_rows[4] == ["health", "off", "off"]
     acts = by["gpu"]["pages"][0]["actions"]
     assert [a["id"] for a in acts] == ["gpu_power", "os_windows", "os_linux"]
-    assert acts[0]["label"] == "ON" and acts[0]["color"] == "blue"
+    assert acts[0]["label"] == "ON" and acts[0]["color"] == "grey"
     assert acts[0]["confirm"]["verb"] == "On"
-    assert acts[1]["color"] == "yellow" and acts[2]["color"] == "green"
+    assert acts[1]["color"] == "blue" and acts[2]["color"] == "green"
+    down = build({"gpu": {"on": False, "os": "switching", "os_phase": "poweroff"}})
+    down = next(t for t in down if t["id"] == "gpu")
+    assert down["state"] == "off"
+    assert down["big"] == "OFF"
+    assert down["l2"] != "busy"
+    assert down["pages"][0]["actions"][0]["color"] == "grey"
+    assert down["pages"][0]["actions"][0]["label"] == "OFF"
     win = build({"gpu": {"on": False, "os": "windows", "temp": 47, "vram_free_mb": 20000, "vram_total_mb": 24576}})
     win = next(t for t in win if t["id"] == "gpu")
     win_rows = win["pages"][0]["rows"]

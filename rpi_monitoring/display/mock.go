@@ -29,7 +29,7 @@ func baseSnap() *Snapshot {
 		},
 		Actions: []Action{
 			{ID: "gpu_power", Label: "OFF", Enabled: true, Color: "red", Confirm: &Confirm{Title: "Power off GPU?", Body: "Drains the cluster, then shuts the host down.", Verb: "Off"}},
-			{ID: "os_windows", Label: "WINDOWS", Enabled: true, Color: "yellow", Confirm: &Confirm{Title: "Switch to Windows?", Body: "Drains the cluster and reboots into Windows.", Verb: "Windows"}},
+			{ID: "os_windows", Label: "WINDOWS", Enabled: true, Color: "blue", Confirm: &Confirm{Title: "Switch to Windows?", Body: "Drains the cluster and reboots into Windows.", Verb: "Windows"}},
 			{ID: "os_linux", Label: "LINUX", Enabled: false, Why: "already linux", Color: "green", Current: true, Confirm: &Confirm{Title: "Switch to Linux?", Body: "Reboots into Proxmox and starts Linux.", Verb: "Linux"}},
 		},
 	}}
