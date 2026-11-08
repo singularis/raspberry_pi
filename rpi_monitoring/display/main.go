@@ -117,6 +117,10 @@ func runDevice(url string, refresh time.Duration) {
 			nextFetch, failWait = afterFetch(r.started, refresh, failWait, r.s, r.err)
 		default:
 		}
+		if a.FetchSoon {
+			a.FetchSoon = false
+			nextFetch = now
+		}
 		if !inFlight && !now.Before(nextFetch) {
 			inFlight = true
 			started := now
@@ -217,7 +221,7 @@ func actionURL(displayURL string) string {
 
 func postAction(url, id string) string {
 	body := bytes.NewBufferString(`{"id":"` + id + `"}`)
-	c := http.Client{Timeout: 5 * time.Second}
+	c := http.Client{Timeout: 2 * time.Second}
 	resp, err := c.Post(url, "application/json", body)
 	if err != nil {
 		return "failed"

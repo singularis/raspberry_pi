@@ -87,6 +87,14 @@ def ready():
     return {"ready": True, "leader": leader()}
 
 
+def _kick(action):
+    if action in ("os_windows", "os_linux", "gpu_power"):
+        from os_switch import start
+        start(action)
+        return
+    fire(action)
+
+
 def _lan(host):
     parts = (host or "").split(".")
     return len(parts) == 4 and parts[0] == "192" and parts[1] == "168" and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts)
@@ -128,11 +136,8 @@ async def actions(request: Request):
         return JSONResponse({"error": "forbidden"}, status_code=403)
     body = await request.json()
     action = body.get("id")
-    if action in ("os_windows", "os_linux", "gpu_power"):
-        from os_switch import start
-        start(action)
-        return {"ok": True, "id": action}
-    if action not in ("wake", "backup"):
+    if action not in ("wake", "backup", "os_windows", "os_linux", "gpu_power"):
         return JSONResponse({"error": "unknown"}, status_code=400)
-    threading.Thread(target=fire, args=(action,), daemon=True).start()
-    return {"ok": True, "id": action}
+    # Answer before any SSH, drain, or reboot. The work continues in the background.
+    threading.Thread(target=_kick, args=(action,), daemon=True).start()
+    return JSONResponse({"ok": True, "id": action}, status_code=200)

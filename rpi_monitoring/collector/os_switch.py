@@ -282,6 +282,12 @@ def start(action):
     with _mu:
         if _job["running"]:
             return True
+    busy = (_remembered().get("job_phase") or "")
+    if busy in ("starting", "rebooting", "draining", "waking", "retry", "poweroff"):
+        return True
+    with _mu:
+        if _job["running"]:
+            return True
         _job["running"] = True
         _job["target"] = action
         _job["phase"] = "starting"
@@ -293,6 +299,16 @@ def start(action):
 def _worker(action):
     ops = Ops()
     try:
+        # Windows is up: reboot it first. Probing the dead Linux VM is a multi-second wait
+        # on every tap, and the screen has nothing to show until that probe finishes.
+        if action == "os_linux" and ops.windows_to_linux() == "down":
+            _set(phase="rebooting", error="")
+            if _wait_reply("linux", ops):
+                _set(phase="", error="")
+                ops.remember("")
+                return
+            _set(phase="failed", error="no reply")
+            return
         probe = ops.probe()
         goal = goal_for(action, probe)
         if goal is None:
@@ -335,6 +351,10 @@ def snapshot(on):
             job = _job["running"]
             phase = _job["phase"]
             error = _job["error"]
+        if not phase:
+            phase = mem.get("job_phase") or ""
+            error = error or (mem.get("job_error") or "")
+            job = job or bool(phase and phase != "failed")
         probe = {
             "job": job,
             "unit": unit,
@@ -366,6 +386,16 @@ def snapshot(on):
 def _set(**kwargs):
     with _mu:
         _job.update(kwargs)
+        snap = dict(_job)
+    try:
+        data = _remembered()
+        data["job_phase"] = snap.get("phase") or ""
+        data["job_error"] = snap.get("error") or ""
+        data["job_target"] = snap.get("target") or ""
+        from lease import save_os
+        save_os(data)
+    except Exception:
+        return
 
 
 def _remembered():

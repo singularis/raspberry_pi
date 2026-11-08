@@ -89,6 +89,7 @@ type App struct {
 
 	ActionURL string
 	Post      func(id string)
+	FetchSoon bool
 	Notes     chan string
 	CamOK     bool
 	CamAt     time.Duration
@@ -510,9 +511,10 @@ func (a *App) confirmTap(id string) {
 		if a.Action != nil {
 			id = a.Action.ID
 		}
-		a.toast("Sending...")
+		a.toast("sent")
 		a.Action = nil
 		a.Screen = scrDetail
+		a.FetchSoon = true
 		if id != "" && a.Post != nil {
 			go a.Post(id)
 		}
