@@ -768,14 +768,13 @@ func (a *App) hit(x, y int) string {
 	case scrNight:
 		return "night"
 	case scrConfirm:
-		cancel, okb := confirmButtons()
-		if p.In(cancel) {
-			return "cancel"
-		}
+		// Anything except OK leaves the dialog. A missed No used to trap the screen,
+		// because every tap restarted the five-second return home.
+		_, okb := confirmButtons()
 		if p.In(okb) {
 			return "ok"
 		}
-		return ""
+		return "cancel"
 	case scrCamera:
 		if p.In(lockHit()) {
 			return "lock"
@@ -823,10 +822,11 @@ func (a *App) hit(x, y int) string {
 		if (t == nil || t.ID != "gpu") && p.In(lockHit()) {
 			return "lock"
 		}
-		if p.In(image.Rect(0, 0, 90, headerH)) {
+		// The drawn header is 34px. A finger lands below it.
+		if p.In(image.Rect(0, 0, 100, headerH+44)) {
 			return "back"
 		}
-		if p.In(image.Rect(W-80, 0, W, headerH)) {
+		if p.In(image.Rect(W-100, 0, W, headerH+44)) {
 			return "page"
 		}
 	case scrSettings:

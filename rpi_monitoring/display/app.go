@@ -296,7 +296,6 @@ func (a *App) pointerDown(x, y int) {
 	a.Down = true
 	a.Press = image.Pt(x, y)
 	a.Target = a.hit(x, y)
-	a.IdleAt = a.Mono
 	a.paint()
 }
 

@@ -77,6 +77,13 @@ func TestGpuButtonsStaySmall(t *testing.T) {
 	if a.Screen != scrConfirm {
 		t.Fatalf("windows confirm %s", a.Screen)
 	}
+	// A tap in the header is not OK, so it leaves the dialog.
+	a.pointerDown(20, 10)
+	a.pointerUp(20, 10)
+	if a.Screen != scrDetail {
+		t.Fatalf("confirm escape %s", a.Screen)
+	}
+	tap(a, "act:os_windows")
 	tap(a, "cancel")
 	tap(a, "act:os_linux")
 	if a.Screen != scrDetail {
