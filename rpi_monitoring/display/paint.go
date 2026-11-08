@@ -791,9 +791,15 @@ func (a *App) hit(x, y int) string {
 	case scrNight:
 		return "night"
 	case scrConfirm:
-		// No leaves. A tap on the text stays, so a near miss does not throw the dialog away.
-		// Outside the panel still leaves. A missed No used to trap the screen.
+		// The right half of the bottom band is OK, including the bezel past the drawn button.
+		// A tap on the text stays. Outside the panel still leaves.
 		cancel, okb := confirmButtons()
+		if p.Y >= cancel.Min.Y-8 {
+			if p.X >= W/2 {
+				return "ok"
+			}
+			return "cancel"
+		}
 		if p.In(okb) {
 			return "ok"
 		}

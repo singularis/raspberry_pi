@@ -310,12 +310,14 @@ func (a *App) pointerDown(x, y int) {
 
 func (a *App) pointerUp(x, y int) {
 	id := a.hit(x, y)
+	down := a.Target
 	if a.Target == "lock" && rectDist(lockHit(), x, y) <= 36 {
 		id = "lock"
 	}
 	if len(a.Target) > 4 && a.Target[:4] == "act:" && id != a.Target && a.nearAction(a.Target, x, y) {
 		id = a.Target
 	}
+	fmt.Printf("touch %d,%d down=%s up=%s screen=%s\n", x, y, down, id, a.Screen)
 	same := a.Down && id != "" && id == a.Target
 	a.Down = false
 	a.Target = ""
@@ -527,6 +529,7 @@ func (a *App) sendConfirm() {
 	if a.Action != nil {
 		id = a.Action.ID
 	}
+	fmt.Printf("confirm send %s\n", id)
 	a.toast("sent")
 	a.Action = nil
 	a.Screen = scrDetail

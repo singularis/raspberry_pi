@@ -159,11 +159,11 @@ func pageRect() image.Rectangle  { return image.Rect(W-42, 2, W-4, headerH) }
 
 func cameraButton() image.Rectangle { return image.Rect(36, 112, W-36, 176) }
 
-func confirmPanel() image.Rectangle { return image.Rect(8, headerH+8, W-8, H-8) }
+func confirmPanel() image.Rectangle { return image.Rect(4, headerH+6, W-4, H-1) }
 
 func confirmButtons() (cancel, ok image.Rectangle) {
-	p := confirmPanel()
-	y0 := p.Max.Y - 44
-	mid := p.Min.X + p.Dx()/2
-	return image.Rect(p.Min.X+8, y0, mid-6, p.Max.Y-8), image.Rect(mid+6, y0, p.Max.X-8, p.Max.Y-8)
+	y0 := H - 56
+	mid := W / 2
+	// Reach the bottom edge. A finger on OK was landing past the old button and counted as No.
+	return image.Rect(4, y0, mid-4, H-1), image.Rect(mid+4, y0, W-4, H-1)
 }

@@ -224,8 +224,10 @@ func postAction(url, id string) string {
 	c := http.Client{Timeout: 2 * time.Second}
 	resp, err := c.Post(url, "application/json", body)
 	if err != nil {
+		fmt.Printf("post %s %s err %v\n", url, id, err)
 		return "failed"
 	}
+	fmt.Printf("post %s %s http %d\n", url, id, resp.StatusCode)
 	defer resp.Body.Close()
 	if resp.StatusCode == 403 {
 		return "denied"

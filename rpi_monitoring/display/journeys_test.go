@@ -88,6 +88,10 @@ func TestGpuButtonsStaySmall(t *testing.T) {
 	if a.Screen != scrConfirm {
 		t.Fatalf("windows confirm %s", a.Screen)
 	}
+	// Real taps landed on the bottom edge of the right button and were read as No.
+	if a.hit(206, 235) != "ok" || a.hit(216, 236) != "ok" {
+		t.Fatal("bottom ok")
+	}
 	// A tap in the header is not OK, so it leaves the dialog.
 	a.pointerDown(20, 10)
 	a.pointerUp(20, 10)
