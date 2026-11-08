@@ -123,8 +123,8 @@ def snap(tiles, next_in_s=60, temp_out=None, weather=None, sensor=None):
     return body
 
 
-def tile(tid, label, state, big, l2="", l3="", cap="", spark=None, pages=None, screen="", camera=None):
-    return {
+def tile(tid, label, state, big, l2="", l3="", cap="", spark=None, pages=None, screen="", camera=None, os_name=""):
+    body = {
         "id": tid,
         "label": label,
         "state": state,
@@ -138,6 +138,9 @@ def tile(tid, label, state, big, l2="", l3="", cap="", spark=None, pages=None, s
         "screen": screen,
         "camera": camera,
     }
+    if os_name:
+        body["os"] = os_name
+    return body
 
 
 def worst(*states):

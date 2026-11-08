@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LCD monitor</title>
-<link rel="stylesheet" href="/static/style.css?v=8">
+<link rel="stylesheet" href="/static/style.css?v=9">
 </head>
 <body>
 <main class="page">
@@ -85,6 +85,12 @@ function paint() {
     const h = document.createElement("h2");
     h.textContent = t.label || "";
     head.appendChild(h);
+    if (t.os) {
+      const os = document.createElement("span");
+      os.className = "os";
+      os.textContent = t.os;
+      head.appendChild(os);
+    }
     if (t.cap) {
       const cap = document.createElement("span");
       cap.className = "cap";

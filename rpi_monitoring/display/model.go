@@ -50,6 +50,7 @@ type Tile struct {
 	Pages  []Page    `json:"pages,omitempty"`
 	Screen string    `json:"screen,omitempty"`
 	Camera *Camera   `json:"camera,omitempty"`
+	OS     string    `json:"os,omitempty"`
 }
 
 type Page struct {

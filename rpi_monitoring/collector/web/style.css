@@ -102,6 +102,7 @@ h1.crit { color: var(--crit); }
 .row span.off, .row span.stale { color: var(--off); }
 .row span.busy { color: var(--busy); }
 .row.head { color: var(--muted); font-size: 11px; }
+.os { margin-left: auto; font-size: 12px; letter-spacing: 0.04em; text-transform: lowercase; color: var(--ink); }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .actions button {
   border: 1px solid rgba(255, 255, 255, 0.28);

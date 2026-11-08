@@ -87,7 +87,8 @@ def test_detail_pages():
     assert by["eateria"]["big"] == "8"
     assert by["eateria"]["state"] == "ok"
     gpu_rows = by["gpu"]["pages"][0]["rows"]
-    assert [r[0] for r in gpu_rows] == ["gpu temp", "gpu vram", "/ free", "mode", "health"]
+    assert [r[0] for r in gpu_rows] == ["gpu temp", "gpu vram", "/ free", "os", "health"]
+    assert by["gpu"]["os"] == "off"
     assert gpu_rows[3][1] == "off"
     assert gpu_rows[4] == ["health", "off", "off"]
     acts = by["gpu"]["pages"][0]["actions"]
@@ -98,9 +99,13 @@ def test_detail_pages():
     win = build({"gpu": {"on": False, "os": "windows", "temp": 47, "vram_free_mb": 20000, "vram_total_mb": 24576}})
     win = next(t for t in win if t["id"] == "gpu")
     win_rows = win["pages"][0]["rows"]
+    assert [r[0] for r in win_rows] == ["gpu temp", "gpu vram", "os", "health"]
     assert win_rows[0] == ["gpu temp", "47C", "ok"]
-    assert win_rows[3][1] == "windows"
+    assert win_rows[2][1] == "windows"
+    assert win["os"] == "windows"
     assert win["big"] == "WIN"
+    assert len(win["pages"]) == 1
+    assert "k8s" not in {r[0] for r in win_rows}
     assert by["backup"]["pages"][0]["actions"][0]["id"] == "wake"
     assert by["backup"]["pages"][0]["actions"][1]["id"] == "backup"
     assert by["backup"]["pages"][0]["rows"][0] == ["staging free", "off", "off"]

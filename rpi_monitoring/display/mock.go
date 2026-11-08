@@ -24,7 +24,7 @@ func baseSnap() *Snapshot {
 			{Label: "gpu temp", Value: "54C", State: "ok"},
 			{Label: "gpu vram", Value: "62% 15G", State: "ok"},
 			{Label: "/ free", Value: "48% 420G", State: "ok"},
-			{Label: "mode", Value: "linux", State: "ok"},
+			{Label: "os", Value: "linux", State: "ok"},
 			{Label: "health", Value: "ok", State: "ok"},
 		},
 		Actions: []Action{

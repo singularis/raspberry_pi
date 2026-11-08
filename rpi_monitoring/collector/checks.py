@@ -228,11 +228,10 @@ def _gpu_tile(gpu):
             vram[0] = "gpu vram"
             if gpu.get("vram_free_mb") is None:
                 vram = _row("gpu vram", "--", "off")
-            head = [
-                _temp_row("gpu temp", gpu.get("temp"), 83, 90),
-                vram,
-                _row("/ free", "--", "off"),
-            ]
+            head = [_temp_row("gpu temp", gpu.get("temp"), 83, 90)]
+            if gpu.get("load") is not None:
+                head.append(_gpu_load_row(gpu.get("load")))
+            head.append(vram)
             states = [row[2] for row in head if row[2] in ("ok", "warn", "crit")]
             health = worst(*states) if states else "off"
         else:
@@ -240,20 +239,25 @@ def _gpu_tile(gpu):
             health = "off"
     mode_text, mode_state = _gpu_mode(os_name, phase, err)
     health_text = {"ok": "ok", "warn": "warn", "crit": "bad", "off": "off"}.get(health, health)
-    page1 = head + [_row("mode", mode_text, mode_state), _row("health", health_text, health)]
-    pages = [{"rows": page1, "actions": _gpu_actions(os_name, phase)}, {"rows": rest}]
-    if show and gpu.get("claw_lines"):
-        pages.append({"rows": [_row("claw", ln, "warn" if claw_ok is False else "ok") for ln in gpu.get("claw_lines")[:4]]})
-    if power == "off":
+    page1 = head + [_row("os", mode_text, mode_state), _row("health", health_text, health)]
+    pages = [{"rows": page1, "actions": _gpu_actions(os_name, phase)}]
+    # Linux rows stay off this tile while the box is in Windows.
+    if os_name != "windows":
+        pages.append({"rows": rest})
+        if show and gpu.get("claw_lines"):
+            pages.append({"rows": [_row("claw", ln, "warn" if claw_ok is False else "ok") for ln in gpu.get("claw_lines")[:4]]})
+    if os_name == "windows":
+        l3 = (str(int(round(gpu.get("watts")))) + "W") if gpu.get("watts") is not None else "windows"
+    elif power == "off":
         l3 = "LLM off"
     elif power == "starting":
         l3 = "LLM starting"
     else:
         l3 = "openclaw " + ("ok" if claw_ok else "warn" if claw_ok is False else "--")
-    st = health if show else "off"
+    st = health if show or (os_name == "windows" and gpu.get("temp") is not None) else "off"
     if os_name == "switching":
         st = health if health != "off" else "busy"
-    return tile("gpu", "GPU", st, big, l2=l2, l3=l3, pages=pages)
+    return tile("gpu", "GPU", st, big, l2=l2, l3=l3, pages=pages, os_name=os_name)
 
 
 def _gpu_mode(os_name, phase, err):

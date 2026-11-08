@@ -51,7 +51,7 @@ func TestGpuButtonsStaySmall(t *testing.T) {
 	for _, b := range a.boxes {
 		seen[b.S] = true
 	}
-	for _, word := range []string{"gpu temp", "gpu vram", "/ free", "mode", "health", "OFF", "WINDOWS", "LINUX"} {
+	for _, word := range []string{"gpu temp", "gpu vram", "/ free", "os", "health", "OFF", "WINDOWS", "LINUX"} {
 		if !seen[word] {
 			t.Fatalf("missing %q", word)
 		}

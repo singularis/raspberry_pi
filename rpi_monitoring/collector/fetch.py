@@ -1004,7 +1004,7 @@ def windows_nvidia():
         return {}
     result = ssh_run(
         target,
-        "nvidia-smi --query-gpu=temperature.gpu,memory.free,memory.total --format=csv,noheader,nounits",
+        "nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,power.draw,memory.free,memory.total --format=csv,noheader,nounits",
         timeout=15,
     )
     if result is None or result.returncode != 0:
@@ -1018,11 +1018,17 @@ def windows_nvidia():
             return None
 
     temp = num(0)
-    free_mb = num(1)
-    total_mb = num(2)
+    load = num(1)
+    watts = num(2)
+    free_mb = num(3)
+    total_mb = num(4)
     out = {}
     if temp is not None:
         out["temp"] = temp
+    if load is not None:
+        out["load"] = load
+    if watts is not None:
+        out["watts"] = watts
     if free_mb is not None:
         out["vram_free_mb"] = free_mb
     if total_mb is not None:
