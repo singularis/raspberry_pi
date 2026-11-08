@@ -304,15 +304,23 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 	}
 	face := a.F.sans20
 	pitch := faceH(face) + 1
-	if len(rows) >= 9 {
+	// GPU page 1 has five rows and a power button stacked on the lock.
+	// The 20px face clips the health row. The 9-row pages already use 17px.
+	if t.ID == "gpu" || len(rows) >= 9 {
 		face = a.F.sans17
 		pitch = 22
 	}
 	right := W - 8
 	btns := pageActionButtons(t.ID, len(p.Actions))
 	textStop := H - 2
-	if len(btns) > 0 && t.ID == "backup" {
-		textStop = btns[0].Min.Y - 4
+	if len(btns) > 0 && (t.ID == "backup" || t.ID == "gpu") {
+		top := btns[0].Min.Y
+		for _, b := range btns {
+			if b.Min.Y < top {
+				top = b.Min.Y
+			}
+		}
+		textStop = top - 4
 	} else if len(btns) > 0 {
 		right = btns[0].Min.X - 6
 	}
@@ -386,15 +394,47 @@ func (a *App) paintMetricRow(face font.Face, row Row, y, pitch, right int, dual 
 	}
 }
 
-func (a *App) paintAction(r image.Rectangle, act Action) {
-	c := dayFill("ok")
-	if !act.Enabled {
-		c = dayFill("off")
+func border(img *image.RGBA, r image.Rectangle, c color.Color) {
+	fill(img, image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+2), c)
+	fill(img, image.Rect(r.Min.X, r.Max.Y-2, r.Max.X, r.Max.Y), c)
+	fill(img, image.Rect(r.Min.X, r.Min.Y, r.Min.X+2, r.Max.Y), c)
+	fill(img, image.Rect(r.Max.X-2, r.Min.Y, r.Max.X, r.Max.Y), c)
+}
+
+func actionFill(act Action) color.RGBA {
+	if !act.Enabled && !act.Current {
+		return dayFill("off")
 	}
+	switch act.Color {
+	case "yellow":
+		return dayFill("warn")
+	case "green":
+		return dayFill("ok")
+	case "red":
+		return dayFill("crit")
+	case "blue":
+		return dayFill("busy")
+	default:
+		if !act.Enabled {
+			return dayFill("off")
+		}
+		return dayFill("ok")
+	}
+}
+
+func (a *App) paintAction(r image.Rectangle, act Action) {
+	c := actionFill(act)
 	fill(a.Img, r, c)
+	if act.Current {
+		border(a.Img, r, color.RGBA{255, 255, 255, 255})
+	}
 	white := color.RGBA{255, 255, 255, 255}
+	if r.Dx() < 56 {
+		a.put(a.F.sans11, act.Label, r.Inset(1), white, true)
+		return
+	}
 	if r.Dy() < faceH(a.F.sans20)*2 {
-		a.put(a.F.sans14, act.Label, r.Inset(4), white, true)
+		a.put(a.F.sans20, act.Label, r.Inset(2), white, true)
 		return
 	}
 	lines := buttonLines(act.Label)
@@ -750,10 +790,25 @@ func (a *App) hit(x, y int) string {
 			return "start"
 		}
 	case scrDetail:
-		if p.In(lockHit()) {
+		t := a.cur()
+		if t != nil && t.ID == "gpu" {
+			// The wide lock corner would cover Power and the right edge of Linux.
+			if a.Page < len(t.Pages) {
+				acts := t.Pages[a.Page].Actions
+				btns := pageActionButtons(t.ID, len(acts))
+				for i, act := range acts {
+					if i < len(btns) && p.In(btns[i]) {
+						return "act:" + act.ID
+					}
+				}
+			}
+			if p.In(lockRect()) {
+				return "lock"
+			}
+		} else if p.In(lockHit()) {
 			return "lock"
 		}
-		if t := a.cur(); t != nil && a.Page < len(t.Pages) {
+		if t != nil && t.ID != "gpu" && a.Page < len(t.Pages) {
 			acts := t.Pages[a.Page].Actions
 			btns := pageActionButtons(t.ID, len(acts))
 			for i, act := range acts {
@@ -765,7 +820,7 @@ func (a *App) hit(x, y int) string {
 				}
 			}
 		}
-		if p.In(lockHit()) {
+		if (t == nil || t.ID != "gpu") && p.In(lockHit()) {
 			return "lock"
 		}
 		if p.In(image.Rect(0, 0, 90, headerH)) {

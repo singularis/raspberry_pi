@@ -3,6 +3,7 @@
 import os
 import re
 import socket
+import subprocess
 import threading
 import time
 from datetime import datetime, timezone
@@ -591,11 +592,23 @@ def assemble():
     # Backepr storage waits on disks that live on the GPU host. Skip it while that host is off.
     staging = storage_body("staging") if on else {}
     archive = storage_body("archive") if on else {}
+    arch_on = bool(archive.get("mounted"))
+    arch_free = _gib(archive.get("free_bytes")) if arch_on else None
+    arch_pct = archive.get("percent_used") if arch_on else None
+    # The archive disk is often unmounted. Keep the last size in the lease notes
+    # (same store as the worker spark and the speed test) and show that instead of "idle".
+    if arch_free is not None:
+        notes["archive_free_gb"] = arch_free
+        if arch_pct is not None:
+            notes["archive_used_pct"] = arch_pct
+    else:
+        arch_free = notes.get("archive_free_gb")
+        arch_pct = notes.get("archive_used_pct")
     hole = pihole()
     down_mbps, up_mbps = speedtest(notes)
     _save_notes(notes)
     gpu_root = next((d for d in (gpu_m.get("disks") or []) if d.get("name") == "root"), {})
-    return {
+    out = {
         "nodes": {
             "racoon": rac,
             "worker": wrk,
@@ -656,9 +669,9 @@ def assemble():
             "staging_free_gb": _gib(staging.get("free_bytes")) if staging.get("mounted") else None,
             "staging_used_pct": staging.get("percent_used") if staging.get("mounted") else None,
             "staging_mounted": bool(staging.get("mounted")),
-            "archive_free_gb": _gib(archive.get("free_bytes")),
-            "archive_used_pct": archive.get("percent_used"),
-            "archive_mounted": bool(archive.get("mounted")),
+            "archive_free_gb": arch_free,
+            "archive_used_pct": arch_pct,
+            "archive_mounted": arch_on,
         },
         "net": {
             "router": router,
@@ -682,6 +695,12 @@ def assemble():
         },
         "weather": weather(),
     }
+    try:
+        from os_switch import snapshot
+        out["gpu"].update(snapshot(on))
+    except Exception as exc:
+        print("os snapshot failed", type(exc).__name__)
+    return out
 
 
 def storage_body(kind):
@@ -931,7 +950,33 @@ def _save_notes(data):
         pass
 
 
+def _known_hosts():
+    vault = "/vault/secrets/known_hosts"
+    if os.path.isfile(vault) and os.path.getsize(vault) > 0:
+        return vault, "yes"
+    return "/tmp/known_hosts", "no"
+
+
+def ssh_run(target, cmd, timeout=20):
+    """One SSH command. Vault known_hosts turns strict checking on. Missing key returns None."""
+    key = _gpu_key()
+    if not key or not target:
+        return None
+    known, strict = _known_hosts()
+    try:
+        return subprocess.run(
+            ["ssh", "-i", key, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=" + strict,
+             "-o", "UserKnownHostsFile=" + known, "-o", "ConnectTimeout=5", target, cmd],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except Exception:
+        return None
+
+
 def _gpu_key():
+    vault = "/vault/secrets/ssh_key"
+    if os.path.isfile(vault) and os.path.getsize(vault) > 0:
+        return vault
     path = os.environ.get("GPU_SSH_KEY", "/tmp/gpu_ssh_key")
     if os.path.exists(path) and os.path.getsize(path) > 0:
         return path
@@ -966,16 +1011,12 @@ def openclaw_report():
     key = _gpu_key()
     if not key:
         return ["openclaw: no ssh key"], False, {}
-    import subprocess
-    try:
-        r = subprocess.run(
-            ["ssh", "-i", key, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
-             "-o", "UserKnownHostsFile=/tmp/known_hosts", "-o", "ConnectTimeout=5",
-             "dante@192.168.1.5",
-             "openclaw health --json; echo '---SPLIT---'; openclaw status --json; echo '---SPLIT---'; nvidia-smi --query-gpu=temperature.gpu,power.draw,utilization.gpu,memory.free,memory.total --format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=20,
-        )
-    except Exception:
+    r = ssh_run(
+        "dante@192.168.1.5",
+        "openclaw health --json; echo '---SPLIT---'; openclaw status --json; echo '---SPLIT---'; nvidia-smi --query-gpu=temperature.gpu,power.draw,utilization.gpu,memory.free,memory.total --format=csv,noheader,nounits",
+        timeout=20,
+    )
+    if r is None:
         return ["openclaw: ssh failed"], False, {}
     if r.returncode != 0:
         return ["openclaw: ssh failed"], False, {}

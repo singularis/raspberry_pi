@@ -110,6 +110,8 @@ type Action struct {
 	Label   string   `json:"label"`
 	Enabled bool     `json:"enabled"`
 	Why     string   `json:"why,omitempty"`
+	Color   string   `json:"color,omitempty"`
+	Current bool     `json:"current,omitempty"`
 	Confirm *Confirm `json:"confirm,omitempty"`
 }
 

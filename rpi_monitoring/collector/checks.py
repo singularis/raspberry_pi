@@ -170,22 +170,28 @@ def _gpu_tile(gpu):
     on = bool(gpu.get("on"))
     should = bool(gpu.get("should_on"))
     claw_ok = gpu.get("claw_ok")
-    st = gpu_state(on, should, gpu.get("vllm"), gpu.get("vllm_late"), claw_ok, gpu.get("temp"), gpu.get("llm_power") or "")
+    os_name = gpu.get("os") or ("linux" if on else "off")
+    phase = gpu.get("os_phase") or ""
+    err = gpu.get("os_error") or ""
+    show = os_name == "linux" or (os_name == "switching" and gpu.get("os_metrics")) or (not gpu.get("os") and on)
     watts = gpu.get("watts")
     watt_s = "" if watts is None else " " + str(int(round(watts))) + "W"
-    if not on:
-        big, l2 = "OFF", "since " + (gpu.get("off_since") or "--")
-        rows = _off("cpu", "ram free", "gpu", "gpu ram", "staging free", "/ free", "cpu temp", "gpu temp", "k8s")
-        pages = [{"rows": rows}]
+    power = gpu.get("llm_power") or ""
+    if power == "off":
+        vllm_bit = "LLM off"
+    elif power == "starting":
+        vllm_bit = "LLM starting"
     else:
-        power = gpu.get("llm_power") or ""
-        if power == "off":
-            vllm_bit = "LLM off"
-        elif power == "starting":
-            vllm_bit = "LLM starting"
-        else:
-            vllm_bit = "vllm " + ("up" if gpu.get("vllm") else "down")
+        vllm_bit = "vllm " + ("up" if gpu.get("vllm") else "down")
+    if os_name == "windows":
+        big, l2 = "WIN", "windows"
+    elif os_name == "switching" or phase in ("draining", "rebooting", "starting", "retry", "waking", "poweroff"):
+        big, l2 = "...", (err or phase or "switching")[:16]
+    elif not show:
+        big, l2 = "OFF", "since " + (gpu.get("off_since") or "--")
+    else:
         big, l2 = _temp(gpu.get("temp")), vllm_bit + watt_s
+    if show:
         node = {
             "cpu": gpu.get("cpu"),
             "ram_pct": gpu.get("ram_pct"),
@@ -193,26 +199,97 @@ def _gpu_tile(gpu):
             "temp": gpu.get("cpu_temp"),
             "k8s": gpu.get("k8s"),
         }
-        rows = [_cpu_row(node.get("cpu")), _ram_row(node), _gpu_load_row(gpu.get("load")), _vram_row(gpu)]
-        if gpu.get("staging_mounted"):
-            rows.append(_disk_row("staging", gpu.get("staging_used_pct"), gpu.get("staging_free_gb")))
-        else:
-            rows.append(_row("staging free", "off", "off"))
-        rows.append(_disk_row("root", gpu.get("root_pct"), gpu.get("root_free_gb")))
-        rows.append(_temp_row("cpu temp", node.get("temp"), 75, 85))
-        rows.append(_temp_row("gpu temp", gpu.get("temp"), 83, 90))
-        rows.append(_k8s_row(node))
-        pages = [{"rows": rows}]
-        if gpu.get("claw_lines"):
-            pages.append({"rows": [_row("claw", ln, "warn" if claw_ok is False else "ok") for ln in gpu.get("claw_lines")[:4]]})
-    power = (gpu.get("llm_power") or "")
+        vram = _vram_row(gpu)
+        vram[0] = "gpu vram"
+        staging = _disk_row("staging", gpu.get("staging_used_pct"), gpu.get("staging_free_gb")) if gpu.get("staging_mounted") else _row("staging free", "off", "off")
+        rest = [
+            _cpu_row(node.get("cpu")),
+            _ram_row(node),
+            _gpu_load_row(gpu.get("load")),
+            staging,
+            _temp_row("cpu temp", node.get("temp"), 75, 85),
+            _k8s_row(node),
+        ]
+        head = [
+            _temp_row("gpu temp", gpu.get("temp"), 83, 90),
+            vram,
+            _disk_row("root", gpu.get("root_pct"), gpu.get("root_free_gb")),
+        ]
+        states = [row[2] for row in head + rest if row[2] in ("ok", "warn", "crit")]
+        if claw_ok is False:
+            states.append("warn")
+        if should and not gpu.get("vllm") and gpu.get("vllm_late") and power not in ("off", "starting"):
+            states.append("crit")
+        health = worst(*states) if states else "ok"
+    else:
+        head = [_row("gpu temp", "--", "off"), _row("gpu vram", "--", "off"), _row("/ free", "--", "off")]
+        rest = _off("cpu", "ram free", "gpu", "staging free", "cpu temp", "k8s")
+        health = "off"
+    mode_text, mode_state = _gpu_mode(os_name, phase, err)
+    health_text = {"ok": "ok", "warn": "warn", "crit": "bad", "off": "off"}.get(health, health)
+    page1 = head + [_row("mode", mode_text, mode_state), _row("health", health_text, health)]
+    pages = [{"rows": page1, "actions": _gpu_actions(os_name, phase)}, {"rows": rest}]
+    if show and gpu.get("claw_lines"):
+        pages.append({"rows": [_row("claw", ln, "warn" if claw_ok is False else "ok") for ln in gpu.get("claw_lines")[:4]]})
     if power == "off":
         l3 = "LLM off"
     elif power == "starting":
         l3 = "LLM starting"
     else:
         l3 = "openclaw " + ("ok" if claw_ok else "warn" if claw_ok is False else "--")
+    st = health if show else "off"
+    if os_name == "switching":
+        st = health if health != "off" else "busy"
     return tile("gpu", "GPU", st, big, l2=l2, l3=l3, pages=pages)
+
+
+def _gpu_mode(os_name, phase, err):
+    if err:
+        return err[:16], "crit"
+    if phase in ("draining", "rebooting", "starting", "retry", "waking", "poweroff"):
+        return phase, "busy"
+    if os_name == "switching":
+        return "switching", "busy"
+    if os_name in ("linux", "windows", "proxmox"):
+        return os_name, "ok"
+    return "off", "off"
+
+
+def _gpu_actions(os_name, phase):
+    busy = phase in ("draining", "rebooting", "starting", "retry", "waking", "poweroff") or os_name == "switching"
+    host_on = os_name in ("linux", "proxmox", "windows", "switching")
+    why_busy = "busy" if busy else ""
+
+    def one(act_id, label, enabled, why, color, title, body, verb, current=False):
+        return {
+            "id": act_id,
+            "label": label,
+            "enabled": enabled,
+            "why": why,
+            "color": color,
+            "current": current,
+            "confirm": {"title": title, "body": body, "verb": verb},
+        }
+
+    if host_on:
+        power = one("gpu_power", "OFF", not busy, why_busy, "red",
+                    "Power off GPU?", "Drains the cluster, then shuts the host down.", "Off")
+    else:
+        power = one("gpu_power", "ON", not busy, why_busy, "blue",
+                    "Power on GPU?", "Wake-on-LAN. Proxmox starts Linux.", "On")
+    windows = one(
+        "os_windows", "WINDOWS", (not busy) and os_name != "windows",
+        why_busy or ("already windows" if os_name == "windows" else ""),
+        "yellow", "Switch to Windows?", "Drains the cluster and reboots into Windows.", "Windows",
+        current=os_name == "windows",
+    )
+    linux = one(
+        "os_linux", "LINUX", (not busy) and os_name != "linux",
+        why_busy or ("already linux" if os_name == "linux" else ""),
+        "green", "Switch to Linux?", "Reboots into Proxmox and starts Linux.", "Linux",
+        current=os_name == "linux",
+    )
+    return [power, windows, linux]
 
 
 def _pi_tile(pi):
@@ -299,16 +376,26 @@ def _backup_tile(bak):
             "confirm": {"title": "Run backup now?", "body": "Starts the staging sync", "verb": "Run"},
         },
     ]
-    cap = "arc off" if arch_on is False else ("arc " + _amt(arch))
     if bak.get("running"):
         cap = "running"
+    elif arch is not None:
+        cap = "arc " + _amt(arch)
+    else:
+        cap = "arc off"
     if gpu_on and bak.get("staging_mounted"):
         staging_row = _disk_row("staging", bak.get("staging_used_pct"), stag)
     else:
         staging_row = _row("staging free", "off", "off")
+    if arch_on:
+        archive_row = _disk_row("archive", bak.get("archive_used_pct"), arch)
+    elif arch is not None:
+        archive_row = _disk_row("archive", bak.get("archive_used_pct"), arch)
+        archive_row[2] = "off"
+    else:
+        archive_row = _row("archive", "--", "off")
     pages = [{"rows": [
         staging_row,
-        _disk_row("archive", bak.get("archive_used_pct"), arch) if arch_on else _row("archive", "idle", "off"),
+        archive_row,
         _row("ESP", ("down" if bak.get("esp_down") else ("up " + str(bak.get("esp_rssi")) + "dBm" if bak.get("esp_rssi") is not None else "up")), "crit" if bak.get("esp_down") else "ok"),
         _row("last", _ago(bak.get("age_d")), "ok" if bak.get("last_ok", True) or bak.get("archive_only") else "crit"),
     ], "actions": actions}]

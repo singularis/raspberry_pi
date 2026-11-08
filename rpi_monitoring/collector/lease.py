@@ -99,6 +99,30 @@ def save_notes(data):
     _put(obj)
 
 
+def load_os():
+    obj = _lease()
+    if not obj:
+        return {}
+    raw = ((obj.get("metadata") or {}).get("annotations") or {}).get("lcd.dev/os")
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_os(data):
+    obj = _lease()
+    if obj is None:
+        return
+    meta = obj.setdefault("metadata", {})
+    ann = meta.setdefault("annotations", {})
+    ann["lcd.dev/os"] = json.dumps(data)
+    _put(obj)
+
+
 def load():
     obj = _lease()
     if not obj:

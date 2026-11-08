@@ -19,17 +19,20 @@ func baseSnap() *Snapshot {
 		{ID: "camera", Label: "CAMERA", State: "idle", Big: "REC", Cap: "ready", L2: "SD 8.0G", L3: "~5h left", Screen: "camera",
 			Camera: &Camera{Phase: "idle", MaxS: 1800, SDFree: "8.0G", HoursLeft: 5, Note: "live view pauses while recording"}},
 	}
-	s.Tiles[2].Pages = []Page{{Rows: []Row{
-		{Label: "cpu", Value: "off", State: "off"},
-		{Label: "ram free", Value: "off", State: "off"},
-		{Label: "gpu", Value: "off", State: "off"},
-		{Label: "gpu ram", Value: "off", State: "off"},
-		{Label: "staging free", Value: "off", State: "off"},
-		{Label: "/ free", Value: "off", State: "off"},
-		{Label: "temp", Value: "off", State: "off"},
-		{Label: "gpu temp", Value: "off", State: "off"},
-		{Label: "k8s", Value: "off", State: "off"},
-	}}}
+	s.Tiles[2].Pages = []Page{{
+		Rows: []Row{
+			{Label: "gpu temp", Value: "54C", State: "ok"},
+			{Label: "gpu vram", Value: "62% 15G", State: "ok"},
+			{Label: "/ free", Value: "48% 420G", State: "ok"},
+			{Label: "mode", Value: "linux", State: "ok"},
+			{Label: "health", Value: "ok", State: "ok"},
+		},
+		Actions: []Action{
+			{ID: "gpu_power", Label: "OFF", Enabled: true, Color: "red", Confirm: &Confirm{Title: "Power off GPU?", Body: "Drains the cluster, then shuts the host down.", Verb: "Off"}},
+			{ID: "os_windows", Label: "WINDOWS", Enabled: true, Color: "yellow", Confirm: &Confirm{Title: "Switch to Windows?", Body: "Drains the cluster and reboots into Windows.", Verb: "Windows"}},
+			{ID: "os_linux", Label: "LINUX", Enabled: false, Why: "already linux", Color: "green", Current: true, Confirm: &Confirm{Title: "Switch to Linux?", Body: "Reboots into Proxmox and starts Linux.", Verb: "Linux"}},
+		},
+	}}
 	s.Tiles[5].Pages = []Page{{
 		Rows: []Row{
 			{Label: "staging free", Value: "off", State: "off"},

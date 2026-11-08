@@ -63,6 +63,31 @@ func actionButtons(n int) []image.Rectangle {
 
 // pageActionButtons puts the backup actions under the text. Other pages keep the right column.
 func pageActionButtons(id string, n int) []image.Rectangle {
+	if id == "gpu" {
+		// Order is power, Windows, Linux. Power sits on the lock.
+		// Windows and Linux share the lock row, same as backup's Run / Wake.
+		if n > 3 {
+			n = 3
+		}
+		if n < 1 {
+			return nil
+		}
+		lock := lockRect()
+		gap := 6
+		power := image.Rect(lock.Min.X, lock.Min.Y-gap-lock.Dy(), lock.Max.X, lock.Min.Y-gap)
+		linuxW := 132
+		linux := image.Rect(lock.Min.X-gap-linuxW, lock.Min.Y, lock.Min.X-gap, lock.Max.Y)
+		windows := image.Rect(8, lock.Min.Y, linux.Min.X-gap, lock.Max.Y)
+		out := make([]image.Rectangle, n)
+		out[0] = power
+		if n > 1 {
+			out[1] = windows
+		}
+		if n > 2 {
+			out[2] = linux
+		}
+		return out
+	}
 	if n > 2 {
 		n = 2
 	}
@@ -70,16 +95,21 @@ func pageActionButtons(id string, n int) []image.Rectangle {
 		return nil
 	}
 	if id == "backup" {
-		y1 := lockRect().Min.Y - 6
-		y0 := y1 - 46
-		gap := 8
-		x0, x1 := 8, W-8
-		w := (x1 - x0 - gap*(n-1)) / n
+		// Wake GPU shares the lock row. Run backup sits to its left.
+		// The text then runs down to that row instead of stopping a band early.
+		lock := lockRect()
+		gap := 6
+		wakeW := 132
+		wake := image.Rect(lock.Min.X-gap-wakeW, lock.Min.Y, lock.Min.X-gap, lock.Max.Y)
+		run := image.Rect(8, lock.Min.Y, wake.Min.X-gap, lock.Max.Y)
 		out := make([]image.Rectangle, n)
-		for i := 0; i < n; i++ {
-			x := x0 + i*(w+gap)
-			out[i] = image.Rect(x, y0, x+w, y1)
+		// Actions are wake, then backup. Draw backup on the left, wake next to the lock.
+		if n == 1 {
+			out[0] = image.Rect(8, lock.Min.Y, lock.Min.X-gap, lock.Max.Y)
+			return out
 		}
+		out[0] = wake
+		out[1] = run
 		return out
 	}
 	x0, x1 := 222, W-6

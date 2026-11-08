@@ -128,6 +128,10 @@ async def actions(request: Request):
         return JSONResponse({"error": "forbidden"}, status_code=403)
     body = await request.json()
     action = body.get("id")
+    if action in ("os_windows", "os_linux", "gpu_power"):
+        from os_switch import start
+        start(action)
+        return {"ok": True, "id": action}
     if action not in ("wake", "backup"):
         return JSONResponse({"error": "unknown"}, status_code=400)
     threading.Thread(target=fire, args=(action,), daemon=True).start()

@@ -36,6 +36,58 @@ func tap(a *App, id string) {
 	a.tap(id)
 }
 
+func TestGpuButtonsStaySmall(t *testing.T) {
+	day := time.Date(2026, 9, 26, 15, 43, 0, 0, time.UTC)
+	a := boot(t, day, baseSnap())
+	tap(a, "tile:2")
+	if a.Screen != scrDetail {
+		t.Fatalf("gpu screen %s", a.Screen)
+	}
+	if f, err := os.Create("preview/gpu_switch.png"); err == nil {
+		_ = png.Encode(f, a.Img)
+		f.Close()
+	}
+	seen := map[string]bool{}
+	for _, b := range a.boxes {
+		seen[b.S] = true
+	}
+	for _, word := range []string{"gpu temp", "gpu vram", "/ free", "mode", "health", "OFF", "WINDOWS", "LINUX"} {
+		if !seen[word] {
+			t.Fatalf("missing %q", word)
+		}
+	}
+	btns := pageActionButtons("gpu", 3)
+	if a.hit(btns[0].Min.X+4, btns[0].Min.Y+4) != "act:gpu_power" {
+		t.Fatal("power")
+	}
+	if a.hit(btns[1].Min.X+4, btns[1].Min.Y+4) != "act:os_windows" {
+		t.Fatal("windows")
+	}
+	if a.hit(btns[2].Min.X+4, btns[2].Min.Y+4) != "act:os_linux" {
+		t.Fatal("linux")
+	}
+	// The old lock corner covers this point. It must not toggle the lock or a button.
+	if got := a.hit(250, 170); got != "" {
+		t.Fatalf("gap hit %s", got)
+	}
+	if a.hit(W-8, H-8) != "lock" {
+		t.Fatal("lock icon")
+	}
+	tap(a, "act:os_windows")
+	if a.Screen != scrConfirm {
+		t.Fatalf("windows confirm %s", a.Screen)
+	}
+	tap(a, "cancel")
+	tap(a, "act:os_linux")
+	if a.Screen != scrDetail {
+		t.Fatalf("current linux should toast, screen %s", a.Screen)
+	}
+	tap(a, "act:gpu_power")
+	if a.Screen != scrConfirm {
+		t.Fatalf("power confirm %s", a.Screen)
+	}
+}
+
 func TestClockTapBelowTheBar(t *testing.T) {
 	a := boot(t, time.Date(2026, 9, 26, 15, 43, 0, 0, time.UTC), baseSnap())
 	if a.hit(30, 40) != "clock" {

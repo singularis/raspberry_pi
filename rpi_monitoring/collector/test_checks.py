@@ -87,12 +87,24 @@ def test_detail_pages():
     assert by["eateria"]["big"] == "8"
     assert by["eateria"]["state"] == "ok"
     gpu_rows = by["gpu"]["pages"][0]["rows"]
-    assert len(gpu_rows) == 9
-    assert all(r[2] == "off" for r in gpu_rows)
-    assert "actions" not in by["gpu"]["pages"][0]
+    assert [r[0] for r in gpu_rows] == ["gpu temp", "gpu vram", "/ free", "mode", "health"]
+    assert gpu_rows[3][1] == "off"
+    assert gpu_rows[4] == ["health", "off", "off"]
+    acts = by["gpu"]["pages"][0]["actions"]
+    assert [a["id"] for a in acts] == ["gpu_power", "os_windows", "os_linux"]
+    assert acts[0]["label"] == "ON" and acts[0]["color"] == "blue"
+    assert acts[0]["confirm"]["verb"] == "On"
+    assert acts[1]["color"] == "yellow" and acts[2]["color"] == "green"
     assert by["backup"]["pages"][0]["actions"][0]["id"] == "wake"
     assert by["backup"]["pages"][0]["actions"][1]["id"] == "backup"
     assert by["backup"]["pages"][0]["rows"][0] == ["staging free", "off", "off"]
+    assert by["backup"]["pages"][0]["rows"][1][1] == "--"
+    remembered = build({"backup": {"archive_mounted": False, "archive_free_gb": 1400, "archive_used_pct": 48}})
+    remembered = next(t for t in remembered if t["id"] == "backup")
+    arch = remembered["pages"][0]["rows"][1]
+    assert arch[0] == "archive" and "idle" not in arch[1] and "1.4T" in arch[1]
+    assert arch[2] == "off"
+    assert remembered["cap"].startswith("arc ")
     assert by["network"]["pages"][0]["rows"][0][0] == "ping"
     assert by["network"]["pages"][0]["rows"][2][0] == "pihole"
     assert by["network"]["big"].endswith("ms")

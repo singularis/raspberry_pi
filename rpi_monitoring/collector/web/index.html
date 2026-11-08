@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LCD monitor</title>
-<link rel="stylesheet" href="/static/style.css?v=7">
+<link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 <body>
 <main class="page">
@@ -126,6 +126,9 @@ function paint() {
         b.type = "button";
         b.textContent = act.label;
         b.disabled = !act.enabled;
+        if (act.color) b.classList.add(act.color);
+        if (act.current) b.classList.add("current");
+        if (act.why) b.title = act.why;
         b.onclick = function () { run(act, note); };
         actions.appendChild(b);
       });
@@ -141,7 +144,8 @@ function paint() {
 
 async function run(act, note) {
   const title = (act.confirm && act.confirm.title) || act.label;
-  if (!window.confirm(title)) return;
+  const body = (act.confirm && act.confirm.body) || "";
+  if (!window.confirm(body ? title + "\n\n" + body : title)) return;
   note.textContent = "sending";
   const r = await fetch("/api/actions", {
     method: "POST",
