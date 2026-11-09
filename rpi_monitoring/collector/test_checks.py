@@ -105,6 +105,12 @@ def test_detail_pages():
     assert down["pages"][0]["actions"][0]["label"] == "OFF"
     assert down["pages"][0]["actions"][1]["enabled"] is True
     assert down["pages"][0]["actions"][2]["enabled"] is True
+    alive = build({"gpu": {"on": True, "os": "switching", "os_phase": "poweroff", "os_metrics": True, "temp": 51, "vllm": True, "claw_ok": True}})
+    alive = next(t for t in alive if t["id"] == "gpu")
+    assert alive["os"] == "linux"
+    assert alive["big"] == "51C"
+    assert alive["state"] != "off"
+    assert next(r for r in alive["pages"][0]["rows"] if r[0] == "os")[1] == "linux"
     quiet = build({"gpu": {"on": True, "os": "linux", "os_phase": "failed", "os_error": "no reply", "temp": 40}})
     quiet = next(t for t in quiet if t["id"] == "gpu")
     assert quiet["state"] == "off"

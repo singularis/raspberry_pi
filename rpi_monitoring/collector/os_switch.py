@@ -383,11 +383,14 @@ def snapshot(on):
         # once the box is dark.
         with _mu:
             local = _job["running"]
-        if not local and phase == "poweroff" and host_down(probe):
+        if not local and phase == "poweroff" and (host_down(probe) or linux or windows):
             phase = ""
             error = ""
             job = False
-            state = "off"
+            probe["job"] = False
+            state = "off" if host_down(probe) else detect(probe)
+            if state == "off" and on and not probe["remembered"]:
+                state = "linux"
             _set(phase="", error="")
         _mark_node(state)
         return {

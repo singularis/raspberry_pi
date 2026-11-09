@@ -173,6 +173,11 @@ def _gpu_tile(gpu):
     os_name = gpu.get("os") or ("linux" if on else "off")
     phase = gpu.get("os_phase") or ""
     err = gpu.get("os_error") or ""
+    # Linux is answering. A leftover power-off flag must not paint the tile off.
+    if phase == "poweroff" and (os_name == "linux" or gpu.get("os_metrics")):
+        phase = ""
+        if os_name == "switching":
+            os_name = "linux"
     show = os_name == "linux" or (os_name == "switching" and gpu.get("os_metrics")) or (not gpu.get("os") and on)
     watts = gpu.get("watts")
     watt_s = "" if watts is None else " " + str(int(round(watts))) + "W"
