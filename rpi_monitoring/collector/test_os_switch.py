@@ -158,3 +158,23 @@ def test_goal_for_buttons():
     assert goal_for("os_linux", linux) is None
     assert goal_for("os_windows", linux) == "windows"
     assert goal_for("os_windows", {"remembered": "windows", "ping": True}) is None
+
+
+def test_windows_off_falls_back_to_shutdown():
+    from os_switch import windows_off_commands
+    cmds = windows_off_commands()
+    assert "poweroff.ps1" in cmds[0]
+    assert cmds[1] == "shutdown /s /t 0 /f"
+
+
+def test_nightly_windows_off_is_after_22():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from os_switch import nightly_due
+    london = ZoneInfo("Europe/London")
+    ten = datetime(2026, 11, 9, 22, 0, tzinfo=london)
+    before = datetime(2026, 11, 9, 21, 59, tzinfo=london)
+    assert nightly_due(ten, "windows", "")
+    assert not nightly_due(before, "windows", "")
+    assert not nightly_due(ten, "linux", "")
+    assert not nightly_due(ten, "windows", "2026-11-09")

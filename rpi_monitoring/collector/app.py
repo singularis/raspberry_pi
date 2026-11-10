@@ -17,6 +17,21 @@ _lock = threading.Lock()
 _cache = {"snap": None, "leader": True}
 ALLOW = {"192.168.0.89", "192.168.0.10", "127.0.0.1"}
 WEB = os.path.join(os.path.dirname(__file__), "web")
+_windows_off_day = ""
+
+
+def _windows_night(facts):
+    """After 22:00 London, power the box off if it is still in Windows. Once a night."""
+    global _windows_off_day
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from os_switch import nightly_due, start
+    now = datetime.now(ZoneInfo("Europe/London"))
+    os_name = ((facts or {}).get("gpu") or {}).get("os") or ""
+    if not nightly_due(now, os_name, _windows_off_day):
+        return
+    start("gpu_power")
+    _windows_off_day = now.date().isoformat()
 
 
 def leader():
@@ -26,6 +41,7 @@ def leader():
 def refresh():
     if not leader():
         return
+    facts = None
     try:
         facts = assemble()
         built = snap(build(facts), weather=facts.get("weather"), sensor=(facts.get("pi") or {}).get("sensor"))
@@ -41,6 +57,8 @@ def refresh():
             publish(built)
         except Exception as exc:
             print("publish failed", type(exc).__name__)
+    if facts is not None and leader():
+        _windows_night(facts)
 
 
 def _remember(body):

@@ -106,11 +106,10 @@ class Ops:
     def windows_off(self):
         if not WINDOWS:
             return "noway"
-        ok = _ssh_ok(
-            WINDOWS,
-            "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\ops\\poweroff.ps1",
-        )
-        return "down" if ok else "fail"
+        for cmd in windows_off_commands():
+            if _ssh_ok(WINDOWS, cmd):
+                return "down"
+        return "fail"
 
     def remote(self, mode):
         """Start switch_os.sh and block until it reboots, finishes, or aborts."""
@@ -150,6 +149,26 @@ class Ops:
 
     def remember(self, mode):
         _remember(mode)
+
+
+def windows_off_commands():
+    """The ops script first. shutdown is on every Windows install if that file is missing."""
+    return (
+        "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\ops\\poweroff.ps1",
+        "shutdown /s /t 0 /f",
+    )
+
+
+def nightly_due(now, os_name, done_day, hour=22):
+    """True once, from 22:00 London, while the GPU box is still in Windows.
+
+    Proxmox's 22:00 cron is not running then. The collector has to send the power-off.
+    """
+    if os_name != "windows":
+        return False
+    if now.hour < hour:
+        return False
+    return done_day != now.date().isoformat()
 
 
 def run(goal, ops):
