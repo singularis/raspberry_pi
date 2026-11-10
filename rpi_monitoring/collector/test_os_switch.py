@@ -177,4 +177,4 @@ def test_nightly_windows_off_is_after_22():
     assert nightly_due(ten, "windows", "")
     assert not nightly_due(before, "windows", "")
     assert not nightly_due(ten, "linux", "")
-    assert not nightly_due(ten, "windows", "2026-11-09")
+    assert nightly_due(ten, "windows", "2026-11-09")

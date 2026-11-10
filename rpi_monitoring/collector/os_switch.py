@@ -159,16 +159,17 @@ def windows_off_commands():
     )
 
 
-def nightly_due(now, os_name, done_day, hour=22):
-    """True once, from 22:00 London, while the GPU box is still in Windows.
+def nightly_due(now, os_name, done_day="", hour=22):
+    """True after 22:00 London while the GPU box is still in Windows.
 
-    Proxmox's 22:00 cron is not running then. The collector has to send the power-off.
+    Proxmox's 22:00 cron is not running then. The collector sends the power-off
+    again if the last attempt failed. done_day is ignored.
     """
     if os_name != "windows":
         return False
     if now.hour < hour:
         return False
-    return done_day != now.date().isoformat()
+    return True
 
 
 def run(goal, ops):
