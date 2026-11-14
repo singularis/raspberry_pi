@@ -24,7 +24,9 @@ func dayFill(state string) color.RGBA {
 		c = color.RGBA{0x1D, 0x4E, 0xD8, 255}
 	case "idle":
 		c = color.RGBA{0x1F, 0x29, 0x37, 255}
-	default: // off, stale, grey
+	case "off", "stale", "grey", "gray":
+		c = color.RGBA{0x4B, 0x55, 0x63, 255}
+	default:
 		c = color.RGBA{0x4B, 0x55, 0x63, 255}
 	}
 	return scale(c, 7, 8)

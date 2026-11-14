@@ -80,7 +80,7 @@ h1.crit { color: var(--crit); }
 .block.ok .big { color: var(--ok); }
 .block.warn .big { color: var(--warn); }
 .block.crit .big { color: var(--crit); }
-.block.off .big, .block.stale .big { color: var(--off); }
+.block.off .big, .block.stale .big, .block.grey .big, .block.gray .big { color: var(--off); }
 .block.busy .big { color: var(--busy); }
 .block.idle .big { color: var(--idle); }
 .row {
@@ -99,7 +99,7 @@ h1.crit { color: var(--crit); }
 .row span.ok { color: var(--ok); }
 .row span.warn { color: var(--warn); }
 .row span.crit { color: var(--crit); }
-.row span.off, .row span.stale { color: var(--off); }
+.row span.off, .row span.stale, .row span.grey, .row span.gray { color: var(--off); }
 .row span.busy { color: var(--busy); }
 .row.head { color: var(--muted); font-size: 11px; }
 .os { margin-left: auto; font-size: 12px; letter-spacing: 0.04em; text-transform: lowercase; color: var(--ink); }

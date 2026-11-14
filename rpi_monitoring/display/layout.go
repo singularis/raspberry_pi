@@ -26,6 +26,17 @@ func lockRect() image.Rectangle {
 	return image.Rect(W-44, H-44, W-4, H-4)
 }
 
+// gpuSide is the short side of the four GPU controls.
+// The panel is 320×240. At 40px the power column was a 40×154 strip, and
+// WINDOWS and LINUX were 40px tall with ~50px of empty panel above them, so a
+// finger landed in the gap or on the lock corner. 64px is 8/5 of that and
+// still clears five 22px rows, which end at y=146.
+const gpuSide = 64
+
+func gpuLockRect() image.Rectangle {
+	return image.Rect(W-4-gpuSide, H-4-gpuSide, W-4, H-4)
+}
+
 func lockHit() image.Rectangle {
 	return image.Rect(W-78, H-78, W, H)
 }
@@ -72,14 +83,13 @@ func pageActionButtons(id string, n int) []image.Rectangle {
 		if n < 1 {
 			return nil
 		}
-		lock := lockRect()
+		lock := gpuLockRect()
 		gap := 6
-		// Power is the lock's column, from under the page number down to the lock.
+		// Power matches the lock: 64×130, from under the page number down to it.
 		power := image.Rect(lock.Min.X, headerH+2, lock.Max.X, lock.Min.Y-gap)
-		// Windows and Linux share the lock row, in proportion to the words, and stop before the lock corner.
-		corner := lockHit()
+		// WINDOWS and LINUX share the lock row, 7:5 by word length. 135×64 and 97×64.
 		rowLeft := 8
-		rowRight := corner.Min.X - gap
+		rowRight := lock.Min.X - gap
 		usable := rowRight - rowLeft - gap
 		winW := usable * 7 / 12
 		windows := image.Rect(rowLeft, lock.Min.Y, rowLeft+winW, lock.Max.Y)

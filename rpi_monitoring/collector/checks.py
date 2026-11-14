@@ -178,6 +178,10 @@ def _gpu_tile(gpu):
         phase = ""
         if os_name == "switching":
             os_name = "linux"
+    # A temperature on screen means that OS answered. A leftover "no reply"
+    # must not leave the tile gray while the number is live.
+    if err == "no reply" and gpu.get("temp") is not None and os_name in ("linux", "windows", "proxmox"):
+        err = ""
     show = os_name == "linux" or (os_name == "switching" and gpu.get("os_metrics")) or (not gpu.get("os") and on)
     watts = gpu.get("watts")
     watt_s = "" if watts is None else " " + str(int(round(watts))) + "W"
@@ -200,6 +204,8 @@ def _gpu_tile(gpu):
         big, l2 = "OFF", "since " + (gpu.get("off_since") or "--")
     else:
         big, l2 = _temp(gpu.get("temp")), vllm_bit + watt_s
+    if err == "no reply" and gpu.get("temp") is None:
+        big, l2 = "OFF", ""
     if show:
         node = {
             "cpu": gpu.get("cpu"),

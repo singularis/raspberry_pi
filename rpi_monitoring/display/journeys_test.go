@@ -66,15 +66,23 @@ func TestGpuButtonsStaySmall(t *testing.T) {
 	if a.hit(btns[2].Min.X+4, btns[2].Min.Y+4) != "act:os_linux" {
 		t.Fatal("linux")
 	}
-	if a.hit(80, 170) != "" {
-		t.Fatalf("above the lock row got %s", a.hit(80, 170))
+	// Five rows end near y=146. The button row starts at y=172, so the gap stays a miss.
+	if a.hit(80, 160) != "" {
+		t.Fatalf("above the buttons got %s", a.hit(80, 160))
 	}
-	// The corner around the icon locks, same as the other screens.
-	if a.hit(250, 170) != "lock" {
-		t.Fatal("lock corner")
+	// The old lock corner covered this point and stole LINUX. It is the gap now.
+	if a.hit(250, 200) != "" {
+		t.Fatalf("gap beside linux got %s", a.hit(250, 200))
 	}
 	if a.hit(W-8, H-8) != "lock" {
 		t.Fatal("lock icon")
+	}
+	lock := gpuLockRect()
+	if lock.Dx() != gpuSide || lock.Dy() != gpuSide {
+		t.Fatalf("lock %v", lock)
+	}
+	if btns[1].Dy() != gpuSide || btns[2].Dy() != gpuSide || btns[0].Dx() != gpuSide {
+		t.Fatalf("buttons %v", btns)
 	}
 	tap(a, "lock")
 	if !a.Locked {

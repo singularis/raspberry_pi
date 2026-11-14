@@ -412,6 +412,12 @@ def snapshot(on):
             if state == "off" and on and not probe["remembered"]:
                 state = "linux"
             _set(phase="", error="")
+        # The OS is answering. A remembered "no reply" must not keep the tile gray.
+        if not local and error == "no reply" and (linux or windows):
+            phase = ""
+            error = ""
+            job = False
+            _set(phase="", error="")
         _mark_node(state)
         return {
             "os": state,

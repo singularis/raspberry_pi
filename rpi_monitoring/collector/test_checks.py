@@ -113,10 +113,17 @@ def test_detail_pages():
     assert next(r for r in alive["pages"][0]["rows"] if r[0] == "os")[1] == "linux"
     quiet = build({"gpu": {"on": True, "os": "linux", "os_phase": "failed", "os_error": "no reply", "temp": 40}})
     quiet = next(t for t in quiet if t["id"] == "gpu")
-    assert quiet["state"] == "off"
+    assert quiet["state"] == "ok"
+    assert quiet["big"] == "40C"
     os_row = next(r for r in quiet["pages"][0]["rows"] if r[0] == "os")
-    assert os_row[1] == "no reply" and os_row[2] == "off"
-    assert not any(a["current"] for a in quiet["pages"][0]["actions"])
+    assert os_row[1] == "linux" and os_row[2] == "ok"
+    linux_btn = next(a for a in quiet["pages"][0]["actions"] if a["id"] == "os_linux")
+    assert linux_btn["current"] is True
+    dark = build({"gpu": {"on": False, "os": "linux", "os_error": "no reply"}})
+    dark = next(t for t in dark if t["id"] == "gpu")
+    assert dark["state"] == "off"
+    assert dark["big"] == "OFF"
+    assert next(r for r in dark["pages"][0]["rows"] if r[0] == "os")[2] == "off"
     win = build({"gpu": {"on": False, "os": "windows", "temp": 47, "vram_free_mb": 20000, "vram_total_mb": 24576}})
     win = next(t for t in win if t["id"] == "gpu")
     win_rows = win["pages"][0]["rows"]

@@ -175,8 +175,17 @@ func (a *App) paintHome(ink color.Color) {
 	}
 }
 
+func (a *App) lockBox() image.Rectangle {
+	if a.Screen == scrDetail {
+		if t := a.cur(); t != nil && t.ID == "gpu" {
+			return gpuLockRect()
+		}
+	}
+	return lockRect()
+}
+
 func (a *App) paintLock() {
-	r := lockRect()
+	r := a.lockBox()
 	fill(a.Img, r, color.RGBA{0, 0, 0, 255})
 	ink := color.RGBA{220, 220, 220, 255}
 	if a.Locked {
@@ -210,7 +219,7 @@ func metricInk(state string) color.Color {
 		return color.RGBA{251, 191, 36, 255}
 	case "crit":
 		return color.RGBA{248, 113, 113, 255}
-	case "off", "stale":
+	case "off", "stale", "grey", "gray":
 		return color.RGBA{156, 163, 175, 255}
 	case "busy":
 		return color.RGBA{96, 165, 250, 255}
@@ -317,7 +326,7 @@ func (a *App) paintDetail(ink color.Color, headerOnly bool) {
 	if t.ID == "gpu" && len(btns) > 0 {
 		// Power is the right column. Rows stay to its left, above the lock row.
 		right = btns[0].Min.X - 4
-		textStop = lockRect().Min.Y - 4
+		textStop = gpuLockRect().Min.Y - 4
 	} else if len(btns) > 0 && t.ID == "backup" {
 		top := btns[0].Min.Y
 		for _, b := range btns {
@@ -810,17 +819,8 @@ func (a *App) hit(x, y int) string {
 	case scrDetail:
 		t := a.cur()
 		if t != nil && t.ID == "gpu" {
-			// Power is the lock-sized button above the icon. The corner beside the icon still locks.
-			if a.Page < len(t.Pages) {
-				acts := t.Pages[a.Page].Actions
-				btns := pageActionButtons(t.ID, len(acts))
-				if len(btns) > 0 && p.In(btns[0]) {
-					return "act:" + acts[0].ID
-				}
-			}
-			if p.In(lockHit()) {
-				return "lock"
-			}
+			// The four controls are the drawn rectangles. The wide lock corner
+			// used to sit on top of LINUX and eat the tap.
 			if a.Page < len(t.Pages) {
 				acts := t.Pages[a.Page].Actions
 				btns := pageActionButtons(t.ID, len(acts))
@@ -829,6 +829,9 @@ func (a *App) hit(x, y int) string {
 						return "act:" + act.ID
 					}
 				}
+			}
+			if p.In(gpuLockRect()) {
+				return "lock"
 			}
 		} else if p.In(lockHit()) {
 			return "lock"
