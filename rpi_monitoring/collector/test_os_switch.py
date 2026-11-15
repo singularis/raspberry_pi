@@ -74,6 +74,7 @@ def test_detect_order():
     assert detect({"linux": True, "proxmox": True}) == "linux"
     assert detect({"proxmox": True}) == "proxmox"
     assert detect({"remembered": "windows", "remembered_age": 10}) == "windows"
+    assert detect({"remembered": "windows", "remembered_age": 120}) == "off"
     assert detect({"remembered": "windows", "remembered_age": 1000, "ping": True}) == "windows"
     assert detect({"remembered": "windows", "remembered_age": 1000}) == "off"
     assert detect({}) == "off"
@@ -158,6 +159,7 @@ def test_goal_for_buttons():
     assert goal_for("os_linux", linux) is None
     assert goal_for("os_windows", linux) == "windows"
     assert goal_for("os_windows", {"remembered": "windows", "ping": True}) is None
+    assert goal_for("os_windows", {"remembered": "windows", "remembered_age": 200}) == "windows"
 
 
 def test_windows_off_falls_back_to_shutdown():

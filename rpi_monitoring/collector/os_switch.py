@@ -21,6 +21,9 @@ WINDOWS = os.environ.get("GPU_WINDOWS_SSH", "")
 MAC = os.environ.get("GPU_WOL_MAC", "18:c0:4d:e0:a4:5d")
 PROXMOX_IP = os.environ.get("PROXMOX_IP", "192.168.0.12")
 REPLY_S = int(os.environ.get("OS_REPLY_S", "600"))
+# The box is silent for about a minute while it reboots. Longer than that, with
+# nothing answering, means it is off. Windows often does not answer ping.
+REBOOT_S = 90
 POLL_S = 15
 
 _mu = threading.Lock()
@@ -41,7 +44,7 @@ def detect(probe):
         return "windows"
     if probe.get("remembered") == "windows":
         age = probe.get("remembered_age")
-        if probe.get("ping") or age is None or age < REPLY_S:
+        if probe.get("ping") or age is None or age < REBOOT_S:
             return "windows"
     return "off"
 
@@ -396,11 +399,7 @@ def start(action):
     with _mu:
         if _job["running"]:
             return True
-    busy = (_remembered().get("job_phase") or "")
-    if busy in ("starting", "rebooting", "draining", "waking", "retry", "poweroff"):
-        # The box is already off. Windows or Linux should wake it, not sit behind the old power-off.
-        if not (busy == "poweroff" and action in ("os_windows", "os_linux")):
-            return True
+    # A phase left in the lease by a dead process must not swallow the next tap.
     with _mu:
         if _job["running"]:
             return True
@@ -435,7 +434,7 @@ def _worker(action):
             _set(phase="", error="")
             if goal == "windows":
                 ops.remember("windows")
-            elif goal == "linux":
+            elif goal in ("linux", "off"):
                 ops.remember("")
         elif result == "abort":
             _set(phase="failed", error="quorum abort")
@@ -490,11 +489,12 @@ def snapshot(on):
         # One missed SSH must not paint a node Kubernetes still sees as off.
         if state == "off" and on and not probe["remembered"]:
             state = "linux"
-        # A power-off left behind by a dead collector must not keep the buttons locked
-        # once the box is dark.
+        # A phase left behind by a dead collector must not keep the buttons locked.
+        # "starting" with the host dark was swallowing the Windows tap.
         with _mu:
             local = _job["running"]
-        if not local and phase == "poweroff" and (host_down(probe) or linux or windows):
+        stale = phase in ("starting", "rebooting", "draining", "waking", "retry", "poweroff")
+        if not local and stale and (host_down(probe) or linux or windows):
             phase = ""
             error = ""
             job = False

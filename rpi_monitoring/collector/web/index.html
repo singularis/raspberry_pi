@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LCD monitor</title>
-<link rel="stylesheet" href="/static/style.css?v=12">
+<link rel="stylesheet" href="/static/style.css?v=13">
 </head>
 <body>
 <main class="page">
@@ -13,11 +13,11 @@
     <h1 id="status">loading</h1>
     <p id="temp" class="weather"></p>
   </header>
-  <div class="skipbar">
-    <button id="skip" type="button">Cancel today's shutdown</button>
-    <p id="skip-note" class="note"></p>
-  </div>
   <div id="sections"></div>
+  <section class="actsec" id="actsec">
+    <h2>Actions</h2>
+    <div id="action-list"></div>
+  </section>
 </main>
 <script>
 const sections = document.getElementById("sections");
@@ -129,69 +129,69 @@ function paint() {
       addRows(rows, camRows);
     }
     sec.appendChild(rows);
-    const actions = document.createElement("div");
-    actions.className = "actions";
-    const note = document.createElement("p");
-    note.className = "note";
-    (t.pages || []).forEach(function (page) {
-      (page.actions || []).forEach(function (act) {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.textContent = act.label;
-        b.disabled = !act.enabled;
-        if (act.color) b.classList.add(act.color);
-        if (act.current) b.classList.add("current");
-        if (act.why) b.title = act.why;
-        b.onclick = function () { run(act, note); };
-        actions.appendChild(b);
-      });
-    });
-    if (actions.childElementCount) {
-      sec.appendChild(actions);
-      sec.appendChild(note);
-    }
     sections.appendChild(sec);
   });
+  paintActions();
   window.scrollTo(0, y);
-  paintSkip();
 }
 
-function paintSkip() {
-  const b = document.getElementById("skip");
-  const note = document.getElementById("skip-note");
-  const on = !!(snap && snap.shutdown_skipped);
-  b.disabled = on;
-  b.textContent = on ? "Shutdown off tonight" : "Cancel today's shutdown";
-  if (note.dataset.busy) return;
-  if (on) {
-    delete note.dataset.kept;
-    note.textContent = "22:00 power-off skipped until midnight";
-    return;
-  }
-  if (note.dataset.kept) return;
-  note.textContent = "";
-}
-
-async function skipToday() {
-  const note = document.getElementById("skip-note");
-  if (!window.confirm("Cancel today's shutdown?\n\nThe 22:00 power-off is skipped until midnight, on Windows and on Linux.")) return;
-  note.dataset.busy = "1";
-  note.textContent = "sending";
-  try {
-    const r = await fetch("/api/actions", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({id: "cancel_shutdown"})
+function paintActions() {
+  const list = document.getElementById("action-list");
+  list.innerHTML = "";
+  const rows = [];
+  (snap.tiles || []).forEach(function (t) {
+    (t.pages || []).forEach(function (page) {
+      (page.actions || []).forEach(function (act) {
+        rows.push({tile: t.label || t.id || "", act: act});
+      });
     });
-    note.textContent = r.ok ? "shutdown off tonight" : "failed";
-    if (r.ok) note.dataset.kept = "1";
-  } catch (e) {
-    note.textContent = "failed";
-  }
-  delete note.dataset.busy;
-  load();
+  });
+  const skipped = !!snap.shutdown_skipped;
+  rows.push({
+    tile: "Tonight",
+    act: {
+      id: "cancel_shutdown",
+      label: skipped ? "Off tonight" : "Cancel shutdown",
+      enabled: !skipped,
+      why: skipped ? "already skipped" : "",
+      color: "yellow",
+      confirm: {
+        title: "Cancel today's shutdown?",
+        body: "Skips the 22:00 power-off until midnight, on Windows and on Linux. The power button still shuts the box down."
+      }
+    }
+  });
+  rows.forEach(function (row) {
+    const act = row.act;
+    const line = document.createElement("div");
+    line.className = "actrow";
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = act.label;
+    b.disabled = !act.enabled;
+    if (act.color) b.classList.add(act.color);
+    if (act.current) b.classList.add("current");
+    const text = document.createElement("div");
+    text.className = "desc";
+    const where = document.createElement("span");
+    where.className = "where";
+    where.textContent = row.tile;
+    const body = document.createElement("p");
+    const confirm = act.confirm || {};
+    let sentence = confirm.body || confirm.title || "";
+    if (!act.enabled && act.why) sentence = (sentence ? sentence + " " : "") + "(" + act.why + ")";
+    body.textContent = sentence;
+    text.appendChild(where);
+    text.appendChild(body);
+    const note = document.createElement("p");
+    note.className = "note";
+    b.onclick = function () { run(act, note); };
+    line.appendChild(b);
+    line.appendChild(text);
+    line.appendChild(note);
+    list.appendChild(line);
+  });
 }
-document.getElementById("skip").onclick = skipToday;
 
 async function run(act, note) {
   const title = (act.confirm && act.confirm.title) || act.label;
