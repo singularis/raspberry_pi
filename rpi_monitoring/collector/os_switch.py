@@ -164,6 +164,10 @@ class Ops:
         if linux:
             _ssh_ok(PROXMOX, linux)
 
+    def boot_verdict(self):
+        """after, before, or empty when Windows SSH does not answer."""
+        return boot_verdict(_ssh_text(WINDOWS, windows_boot_query()))
+
 
 def windows_off_commands():
     """The ops script first. shutdown is on every Windows install if that file is missing."""
@@ -178,7 +182,7 @@ def nightly_due(now, os_name, done_day="", hour=22):
 
     Proxmox's 22:00 cron is not running then, so the collector sends the
     power-off. done_day is a London date (YYYY-MM-DD). When it is today the
-    web page has cancelled tonight's shutdown, and this stays quiet.
+    shutdown was cancelled, or the box was started after 22:00, and this stays quiet.
     """
     if os_name != "windows":
         return False
@@ -187,6 +191,40 @@ def nightly_due(now, os_name, done_day="", hour=22):
     if done_day and done_day == now.date().isoformat():
         return False
     return True
+
+
+def started_after_close(now, boot, hour=22):
+    """True when this boot is the same London day and at or after the close hour."""
+    if now is None or boot is None:
+        return False
+    if now.tzinfo is None or boot.tzinfo is None:
+        return False
+    boot = boot.astimezone(now.tzinfo)
+    if boot.date() != now.date():
+        return False
+    return boot.hour >= hour
+
+
+def boot_verdict(text):
+    """The host prints one word: after, before, or nothing."""
+    words = (text or "").strip().lower().split()
+    if not words:
+        return ""
+    last = words[-1]
+    if last in ("after", "before"):
+        return last
+    return ""
+
+
+def windows_boot_query():
+    """Ask Windows whether this boot is today at or after 22:00 London."""
+    return (
+        "powershell -NoProfile -Command "
+        "\"$tz=[TimeZoneInfo]::FindSystemTimeZoneById('GMT Standard Time'); "
+        "$b=[TimeZoneInfo]::ConvertTime((Get-CimInstance Win32_OperatingSystem).LastBootUpTime,$tz); "
+        "$n=[TimeZoneInfo]::ConvertTime((Get-Date),$tz); "
+        "if($b.Date -eq $n.Date -and $b.Hour -ge 22){'after'}else{'before'}\""
+    )
 
 
 def london_day(now=None):

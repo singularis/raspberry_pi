@@ -183,6 +183,24 @@ def test_nightly_windows_off_is_after_22():
     assert nightly_due(ten, "windows", "2026-11-08")
 
 
+def test_boot_after_22_stays_up_today():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from os_switch import boot_verdict, started_after_close, windows_boot_query
+    london = ZoneInfo("Europe/London")
+    now = datetime(2026, 11, 15, 22, 40, tzinfo=london)
+    late = datetime(2026, 11, 15, 22, 5, tzinfo=london)
+    early = datetime(2026, 11, 15, 18, 0, tzinfo=london)
+    yesterday = datetime(2026, 11, 14, 23, 0, tzinfo=london)
+    assert started_after_close(now, late)
+    assert not started_after_close(now, early)
+    assert not started_after_close(now, yesterday)
+    assert boot_verdict("after\n") == "after"
+    assert boot_verdict("before") == "before"
+    assert boot_verdict("") == ""
+    assert "LastBootUpTime" in windows_boot_query()
+
+
 def test_cancel_skips_tonight_and_stops_a_poweroff():
     import os_switch
     from os_switch import apply_cancel, linux_skip_command, run, shutdown_skipped, windows_skip_command

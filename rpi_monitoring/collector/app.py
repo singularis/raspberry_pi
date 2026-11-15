@@ -27,13 +27,20 @@ def _windows_night(facts):
     """
     from datetime import datetime
     from zoneinfo import ZoneInfo
-    from os_switch import nightly_due, shutdown_skipped, start
+    from os_switch import Ops, apply_cancel, nightly_due, shutdown_skipped, start
     now = datetime.now(ZoneInfo("Europe/London"))
     os_name = ((facts or {}).get("gpu") or {}).get("os") or ""
     skipped = ""
     if shutdown_skipped(now):
         skipped = now.date().isoformat()
     if not nightly_due(now, os_name, skipped):
+        return
+    # A start after 22:00 is intentional. Leave it up for the rest of the night.
+    # Unknown boot time is not proof it has been on since evening, so do not shut it down.
+    verdict = Ops().boot_verdict()
+    if verdict != "before":
+        if verdict == "after":
+            apply_cancel(Ops(), now)
         return
     start("gpu_power")
 
