@@ -45,6 +45,23 @@ h1 {
 h1.ok { color: var(--ok); }
 h1.warn { color: var(--warn); }
 h1.crit { color: var(--crit); }
+.skipbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -4px 0 12px;
+}
+.skipbar button {
+  border: 0;
+  border-radius: 999px;
+  background: #b45309;
+  color: #fff;
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+.skipbar button:disabled { opacity: 0.55; cursor: default; }
+.skipbar .note { margin: 0; }
 .weather {
   margin: 0 0 0 auto;
   color: #d4d4d8;

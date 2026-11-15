@@ -177,4 +177,34 @@ def test_nightly_windows_off_is_after_22():
     assert nightly_due(ten, "windows", "")
     assert not nightly_due(before, "windows", "")
     assert not nightly_due(ten, "linux", "")
-    assert nightly_due(ten, "windows", "2026-11-09")
+    assert not nightly_due(ten, "windows", "2026-11-09")
+    assert nightly_due(ten, "windows", "2026-11-08")
+
+
+def test_cancel_skips_tonight_and_stops_a_poweroff():
+    import os_switch
+    from os_switch import apply_cancel, linux_skip_command, run, shutdown_skipped, windows_skip_command
+    os_switch._abort.clear()
+    os_switch._mem["skip_shutdown"] = ""
+    win = windows_skip_command("2026-11-15")
+    linux = linux_skip_command("2026-11-15")
+    assert "skip-shutdown.txt" in win and "2026-11-15" in win and "shutdown /a" in win
+    assert linux == "echo 2026-11-15 > /var/lib/gpu-skip-shutdown"
+    assert windows_skip_command("today") == ""
+    assert linux_skip_command("today") == ""
+
+    class Ops(Fake):
+        def abort_shutdown(self, day):
+            self.calls.append("abort:" + day)
+
+    ops = Ops()
+    ops.linux = True
+    day = apply_cancel(ops)
+    assert day
+    assert ops.calls == ["abort:" + day]
+    assert shutdown_skipped()
+    assert run("off", ops) == "skip"
+    assert "winoff" not in ops.calls
+    assert "remote:off" not in ops.calls
+    os_switch._abort.clear()
+    os_switch._mem["skip_shutdown"] = ""

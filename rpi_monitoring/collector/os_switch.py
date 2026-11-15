@@ -9,6 +9,7 @@ abort is not a timeout and is not retried.
 """
 
 import os
+import re
 import socket
 import subprocess
 import threading
@@ -24,7 +25,8 @@ POLL_S = 15
 
 _mu = threading.Lock()
 _job = {"running": False, "phase": "", "error": "", "target": ""}
-_mem = {"os_mode": "", "os_mode_at": 0.0}
+_mem = {"os_mode": "", "os_mode_at": 0.0, "skip_shutdown": ""}
+_abort = threading.Event()
 
 
 def detect(probe):
@@ -150,6 +152,15 @@ class Ops:
     def remember(self, mode):
         _remember(mode)
 
+    def abort_shutdown(self, day):
+        """Windows first. The same address is Proxmox only when Windows SSH fails."""
+        win = windows_skip_command(day)
+        if win and _ssh_ok(WINDOWS, win):
+            return
+        linux = linux_skip_command(day)
+        if linux:
+            _ssh_ok(PROXMOX, linux)
+
 
 def windows_off_commands():
     """The ops script first. shutdown is on every Windows install if that file is missing."""
@@ -162,23 +173,92 @@ def windows_off_commands():
 def nightly_due(now, os_name, done_day="", hour=22):
     """True after 22:00 London while the GPU box is still in Windows.
 
-    Proxmox's 22:00 cron is not running then. The collector sends the power-off
-    again if the last attempt failed. done_day is ignored.
+    Proxmox's 22:00 cron is not running then, so the collector sends the
+    power-off. done_day is a London date (YYYY-MM-DD). When it is today the
+    web page has cancelled tonight's shutdown, and this stays quiet.
     """
     if os_name != "windows":
         return False
     if now.hour < hour:
         return False
+    if done_day and done_day == now.date().isoformat():
+        return False
     return True
 
 
+def london_day(now=None):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    if now is None:
+        now = datetime.now(ZoneInfo("Europe/London"))
+    return now.date().isoformat()
+
+
+def _day_ok(day):
+    return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", day or ""))
+
+
+def windows_skip_command(day):
+    """Write today's skip file and abort a pending shutdown. Nothing to abort is fine."""
+    if not _day_ok(day):
+        return ""
+    return (
+        "powershell -NoProfile -Command "
+        "\"Set-Content -Path C:\\ops\\skip-shutdown.txt -Value '" + day + "'; "
+        "shutdown /a\""
+    )
+
+
+def linux_skip_command(day):
+    """Tell Proxmox's 22:00 cron to leave the box up for this London day.
+
+    The cron script reads the file. An explicit power-off still runs, because
+    that caller already holds the switch lock.
+    """
+    if not _day_ok(day):
+        return ""
+    return "echo " + day + " > /var/lib/gpu-skip-shutdown"
+
+
+def shutdown_skipped(now=None):
+    """True when the web page cancelled the shutdown for this London day."""
+    day = (_remembered().get("skip_shutdown") or "")
+    return bool(day) and day == london_day(now)
+
+
+def apply_cancel(ops, now=None):
+    """Skip tonight's Windows and Linux power-off. The manual buttons still work."""
+    day = london_day(now)
+    _abort.set()
+    _mem["skip_shutdown"] = day
+    data = _remembered()
+    data["skip_shutdown"] = day
+    try:
+        from lease import save_os
+        save_os(data)
+    except Exception:
+        pass
+    _set(phase="", error="")
+    ops.abort_shutdown(day)
+    return day
+
+
 def run(goal, ops):
-    """goal is linux, windows, or off. Returns ok, already, abort, noway, or no reply."""
+    """goal is linux, windows, or off. Returns ok, already, abort, noway, skip, or no reply."""
+    if goal == "off" and _abort.is_set():
+        ops.phase("")
+        return "skip"
     if _already(goal, ops.probe()):
         return "already"
     for attempt in (1, 2):
+        if goal == "off" and _abort.is_set():
+            ops.phase("")
+            return "skip"
         ops.phase("starting" if attempt == 1 else "retry")
         result = _step(goal, ops)
+        if result == "skip":
+            ops.phase("")
+            return "skip"
         if result == "abort":
             ops.phase("failed")
             return "abort"
@@ -187,7 +267,11 @@ def run(goal, ops):
             return "noway"
         # timeout: the step already used the 10 minutes. fail: the script never started.
         # Neither should sit for another 10 minutes before the one retry.
-        if result not in ("timeout", "fail") and _wait_reply(goal, ops):
+        replied = result not in ("timeout", "fail") and _wait_reply(goal, ops)
+        if goal == "off" and _abort.is_set():
+            ops.phase("")
+            return "skip"
+        if replied:
             ops.phase("")
             return "ok"
         if attempt == 1:
@@ -253,6 +337,8 @@ def _step_windows(ops, probe):
 
 
 def _step_off(ops, probe):
+    if _abort.is_set():
+        return "skip"
     if _already("off", probe):
         return "done"
     if detect(probe) == "windows" or (probe.get("remembered") == "windows" and not probe.get("proxmox") and not probe.get("linux")):
@@ -267,6 +353,8 @@ def _step_off(ops, probe):
 def _wait_reply(goal, ops):
     deadline = ops.now() + REPLY_S
     while ops.now() < deadline:
+        if goal == "off" and _abort.is_set():
+            return False
         probe = ops.probe()
         if goal == "windows" and (probe.get("linux") or probe.get("proxmox")) and not probe.get("unit"):
             # Came back as Proxmox. This attempt did not land on Windows.
@@ -304,6 +392,7 @@ def goal_for(action, probe):
 
 def start(action):
     """Return True if this process accepted the job. The POST must not wait on SSH."""
+    _abort.clear()
     with _mu:
         if _job["running"]:
             return True
@@ -353,6 +442,8 @@ def _worker(action):
             ops.remember("")
         elif result == "noway":
             _set(phase="failed", error="no windows ssh")
+        elif result == "skip":
+            _set(phase="", error="")
         else:
             _set(phase="failed", error="no reply")
     except Exception as exc:
@@ -490,7 +581,10 @@ def _remember(mode):
     _mem["os_mode_at"] = time.time() if mode else 0
     try:
         from lease import save_os
-        save_os({"os_mode": _mem["os_mode"], "os_mode_at": _mem["os_mode_at"]})
+        data = _remembered()
+        data["os_mode"] = _mem["os_mode"]
+        data["os_mode_at"] = _mem["os_mode_at"]
+        save_os(data)
     except Exception:
         pass
 

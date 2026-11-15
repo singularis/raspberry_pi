@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LCD monitor</title>
-<link rel="stylesheet" href="/static/style.css?v=11">
+<link rel="stylesheet" href="/static/style.css?v=12">
 </head>
 <body>
 <main class="page">
@@ -13,6 +13,10 @@
     <h1 id="status">loading</h1>
     <p id="temp" class="weather"></p>
   </header>
+  <div class="skipbar">
+    <button id="skip" type="button">Cancel today's shutdown</button>
+    <p id="skip-note" class="note"></p>
+  </div>
   <div id="sections"></div>
 </main>
 <script>
@@ -149,7 +153,45 @@ function paint() {
     sections.appendChild(sec);
   });
   window.scrollTo(0, y);
+  paintSkip();
 }
+
+function paintSkip() {
+  const b = document.getElementById("skip");
+  const note = document.getElementById("skip-note");
+  const on = !!(snap && snap.shutdown_skipped);
+  b.disabled = on;
+  b.textContent = on ? "Shutdown off tonight" : "Cancel today's shutdown";
+  if (note.dataset.busy) return;
+  if (on) {
+    delete note.dataset.kept;
+    note.textContent = "22:00 power-off skipped until midnight";
+    return;
+  }
+  if (note.dataset.kept) return;
+  note.textContent = "";
+}
+
+async function skipToday() {
+  const note = document.getElementById("skip-note");
+  if (!window.confirm("Cancel today's shutdown?\n\nThe 22:00 power-off is skipped until midnight, on Windows and on Linux.")) return;
+  note.dataset.busy = "1";
+  note.textContent = "sending";
+  try {
+    const r = await fetch("/api/actions", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({id: "cancel_shutdown"})
+    });
+    note.textContent = r.ok ? "shutdown off tonight" : "failed";
+    if (r.ok) note.dataset.kept = "1";
+  } catch (e) {
+    note.textContent = "failed";
+  }
+  delete note.dataset.busy;
+  load();
+}
+document.getElementById("skip").onclick = skipToday;
 
 async function run(act, note) {
   const title = (act.confirm && act.confirm.title) || act.label;

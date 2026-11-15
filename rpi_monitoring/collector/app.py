@@ -27,10 +27,13 @@ def _windows_night(facts):
     """
     from datetime import datetime
     from zoneinfo import ZoneInfo
-    from os_switch import nightly_due, start
+    from os_switch import nightly_due, shutdown_skipped, start
     now = datetime.now(ZoneInfo("Europe/London"))
     os_name = ((facts or {}).get("gpu") or {}).get("os") or ""
-    if not nightly_due(now, os_name):
+    skipped = ""
+    if shutdown_skipped(now):
+        skipped = now.date().isoformat()
+    if not nightly_due(now, os_name, skipped):
         return
     start("gpu_power")
 
@@ -107,6 +110,10 @@ def ready():
 
 
 def _kick(action):
+    if action == "cancel_shutdown":
+        from os_switch import Ops, apply_cancel
+        apply_cancel(Ops())
+        return
     if action in ("os_windows", "os_linux", "gpu_power"):
         from os_switch import start
         start(action)
@@ -145,7 +152,13 @@ def display():
             body = _cache.get("snap")
     if body is None:
         return JSONResponse({"schema": 1, "tiles": [], "summary": {"warn": 0, "crit": 0, "worst": ""}}, status_code=503)
-    return body
+    shown = dict(body)
+    try:
+        from os_switch import shutdown_skipped
+        shown["shutdown_skipped"] = shutdown_skipped()
+    except Exception:
+        shown["shutdown_skipped"] = False
+    return shown
 
 
 @app.post("/api/actions")
@@ -155,7 +168,7 @@ async def actions(request: Request):
         return JSONResponse({"error": "forbidden"}, status_code=403)
     body = await request.json()
     action = body.get("id")
-    if action not in ("wake", "backup", "os_windows", "os_linux", "gpu_power"):
+    if action not in ("wake", "backup", "os_windows", "os_linux", "gpu_power", "cancel_shutdown"):
         return JSONResponse({"error": "unknown"}, status_code=400)
     # Answer before any SSH, drain, or reboot. The work continues in the background.
     threading.Thread(target=_kick, args=(action,), daemon=True).start()
