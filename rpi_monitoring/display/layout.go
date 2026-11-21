@@ -1,6 +1,10 @@
 package main
 
-import "image"
+import (
+	"image"
+
+	"golang.org/x/image/font"
+)
 
 const (
 	statusH = 22
@@ -32,6 +36,31 @@ func lockRect() image.Rectangle {
 // finger landed in the gap or on the lock corner. 64px is 8/5 of that and
 // still clears five 22px rows, which end at y=146.
 const gpuSide = 64
+
+// gpuWordPx is the drawn advance of WINDOWS and LINUX. measureGPUWords fills
+// it from the largest face that still leaves 8px of padding on each word.
+var gpuWordPx struct{ win, lin int }
+
+func measureGPUWords(f *faces) {
+	usable := gpuOsUsable()
+	for _, face := range []font.Face{f.sans22, f.sans20, f.sans17} {
+		w := font.MeasureString(face, "WINDOWS").Ceil()
+		l := font.MeasureString(face, "LINUX").Ceil()
+		if w+l+16 <= usable {
+			gpuWordPx.win, gpuWordPx.lin = w, l
+			return
+		}
+	}
+	gpuWordPx.win = font.MeasureString(f.sans17, "WINDOWS").Ceil()
+	gpuWordPx.lin = font.MeasureString(f.sans17, "LINUX").Ceil()
+}
+
+func gpuOsUsable() int {
+	gap := 6
+	rowLeft := 8
+	rowRight := gpuLockRect().Min.X - gap
+	return rowRight - rowLeft - gap
+}
 
 func gpuLockRect() image.Rectangle {
 	return image.Rect(W-4-gpuSide, H-4-gpuSide, W-4, H-4)
@@ -85,13 +114,28 @@ func pageActionButtons(id string, n int) []image.Rectangle {
 		}
 		lock := gpuLockRect()
 		gap := 6
-		// Power matches the lock: 64×130, from under the page number down to it.
+		// Power matches the lock: 64 wide, from under the page number down to it.
 		power := image.Rect(lock.Min.X, headerH+2, lock.Max.X, lock.Min.Y-gap)
-		// WINDOWS and LINUX share the lock row, 7:5 by word length. 135×64 and 97×64.
+		// WINDOWS and LINUX share the lock row. Widths are the measured word
+		// pixels plus the same leftover, so each label has equal padding.
 		rowLeft := 8
 		rowRight := lock.Min.X - gap
 		usable := rowRight - rowLeft - gap
-		winW := usable * 7 / 12
+		winPx, linPx := gpuWordPx.win, gpuWordPx.lin
+		if winPx < 1 || linPx < 1 {
+			winPx, linPx = 99, 58
+		}
+		extra := usable - winPx - linPx
+		winW := winPx + extra/2
+		if extra < 0 {
+			winW = usable * winPx / (winPx + linPx)
+		}
+		if winW < 1 {
+			winW = 1
+		}
+		if winW > usable-1 {
+			winW = usable - 1
+		}
 		windows := image.Rect(rowLeft, lock.Min.Y, rowLeft+winW, lock.Max.Y)
 		linux := image.Rect(windows.Max.X+gap, lock.Min.Y, rowRight, lock.Max.Y)
 		out := make([]image.Rectangle, n)

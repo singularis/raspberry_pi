@@ -84,6 +84,20 @@ func TestGpuButtonsStaySmall(t *testing.T) {
 	if btns[1].Dy() != gpuSide || btns[2].Dy() != gpuSide || btns[0].Dx() != gpuSide {
 		t.Fatalf("buttons %v", btns)
 	}
+	// Widths follow the measured word, with at least 8px of padding on each.
+	if gpuWordPx.win < 1 || gpuWordPx.lin < 1 {
+		t.Fatal("word pixels were not measured")
+	}
+	if btns[1].Dx() < gpuWordPx.win+8 || btns[2].Dx() < gpuWordPx.lin+8 {
+		t.Fatalf("windows %dpx for a %dpx word, linux %dpx for a %dpx word",
+			btns[1].Dx(), gpuWordPx.win, btns[2].Dx(), gpuWordPx.lin)
+	}
+	if btns[1].Dx() <= btns[2].Dx() {
+		t.Fatalf("windows %d should be wider than linux %d", btns[1].Dx(), btns[2].Dx())
+	}
+	if btns[1].Dx()+btns[2].Dx() != gpuOsUsable() {
+		t.Fatalf("row %d+%d usable %d", btns[1].Dx(), btns[2].Dx(), gpuOsUsable())
+	}
 	tap(a, "lock")
 	if !a.Locked {
 		t.Fatal("gpu lock")
@@ -127,16 +141,28 @@ func TestEarlyOkSendsWindows(t *testing.T) {
 		t.Fatalf("confirm %s", a.Screen)
 	}
 	_, okb := confirmButtons()
-	a.pointerDown(okb.Min.X+8, okb.Min.Y+8)
-	a.pointerUp(okb.Min.X+8, okb.Min.Y+8)
-	if a.Screen != scrConfirm || !a.OkHeld {
-		t.Fatal("early ok should wait")
-	}
 	got := make(chan string, 1)
 	a.Post = func(id string) { got <- id }
-	a.advance(time.Second)
+	a.pointerDown(okb.Min.X+8, okb.Min.Y+8)
+	a.pointerUp(okb.Min.X+8, okb.Min.Y+8)
 	if a.Screen != scrDetail || a.Toast != "sent" {
 		t.Fatalf("screen %s toast %s", a.Screen, a.Toast)
+	}
+	gpu := a.gpuTile()
+	if gpu == nil || gpu.Big != "..." || gpu.Pages[0].Actions[1].Enabled {
+		t.Fatal("tap did not paint starting")
+	}
+	// A fetch that left before the collector stamped the cache must not unlock the button.
+	a.setSnap(baseSnap(), nil)
+	if a.gpuTile().Big != "..." || a.gpuTile().Pages[0].Actions[1].Enabled {
+		t.Fatal("stale fetch put the old buttons back")
+	}
+	landed := baseSnap()
+	landed.Tiles[2].Pages[0].Rows[3].Value = "starting"
+	landed.Tiles[2].Pages[0].Rows[3].State = "busy"
+	a.setSnap(landed, nil)
+	if a.HoldID != "" {
+		t.Fatal("hold stuck after the collector agreed")
 	}
 	select {
 	case id := <-got:

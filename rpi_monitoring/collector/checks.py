@@ -1,5 +1,7 @@
 """Classify fetched facts. No network in this module."""
 
+import copy
+
 from model import tile, worst
 
 
@@ -278,6 +280,10 @@ def _gpu_tile(gpu):
         st = health if health != "off" else "busy"
     if phase == "poweroff" or os_name == "off" or err == "no reply":
         st = "off"
+    # Linux stays green. A healthy Windows tile is blue so the home icon shows the OS.
+    # Warn and crit still paint over that.
+    if os_name == "windows" and st == "ok":
+        st = "busy"
     return tile("gpu", "GPU", st, big, l2=l2, l3=l3, pages=pages, os_name=os_name)
 
 
@@ -299,7 +305,9 @@ def _gpu_mode(os_name, phase, err):
         return phase, "busy"
     if os_name == "switching":
         return "switching", "busy"
-    if os_name in ("linux", "windows", "proxmox"):
+    if os_name == "windows":
+        return os_name, "busy"
+    if os_name in ("linux", "proxmox"):
         return os_name, "ok"
     return "off", "off"
 
@@ -347,6 +355,40 @@ def _gpu_actions(os_name, phase, err=""):
         current=os_name == "linux" and not no_reply,
     )
     return [power, windows, linux]
+
+
+def stamp_gpu(body, phase="starting"):
+    """Paint a switch onto the cached screen. The POST returns before any SSH."""
+    if not isinstance(body, dict):
+        return
+    phase = (phase or "starting")[:16]
+    tiles = []
+    changed = False
+    for t in body.get("tiles") or []:
+        if t.get("id") != "gpu":
+            tiles.append(t)
+            continue
+        changed = True
+        t = copy.deepcopy(t)
+        t["state"] = "busy"
+        t["big"] = "..."
+        t["l2"] = phase
+        for page in t.get("pages") or []:
+            for row in page.get("rows") or []:
+                if not row or row[0] != "os":
+                    continue
+                row[1] = phase
+                if len(row) > 2:
+                    row[2] = "busy"
+                else:
+                    row.append("busy")
+            for act in page.get("actions") or []:
+                act["enabled"] = False
+                act["why"] = "busy"
+                act["current"] = False
+        tiles.append(t)
+    if changed:
+        body["tiles"] = tiles
 
 
 def _pi_tile(pi):

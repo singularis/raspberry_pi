@@ -92,6 +92,11 @@ type App struct {
 	Post      func(id string)
 	FetchSoon bool
 	Notes     chan string
+	// Hold keeps a GPU tap on screen until the collector agrees, so a slow
+	// probe cannot paint the old buttons back over the tap.
+	HoldID    string
+	HoldFrom  string
+	HoldUntil time.Duration
 	CamOK     bool
 	CamAt     time.Duration
 	dirty     bool
@@ -108,6 +113,7 @@ func newApp(now time.Time) *App {
 		NightTo:   7,
 		Notes:     make(chan string, 4),
 	}
+	measureGPUWords(a.F)
 	a.paint()
 	return a
 }
@@ -253,6 +259,7 @@ func (a *App) setSnap(s *Snapshot, err error) {
 	a.Fails = 0
 	a.Snap = s
 	a.LastOK = a.Mono
+	a.keepHold()
 	if a.Screen == scrConnecting || a.Screen == scrBang || a.Screen == scrBoot || a.Screen == scrGrey {
 		a.goHome()
 	}
@@ -473,7 +480,13 @@ func (a *App) startAction(id string) {
 			cp := *act
 			a.Action = &cp
 			a.Screen = scrConfirm
-			a.ArmedAt = a.Mono + 700*time.Millisecond
+			// GPU taps send on the finger-up. The 0.7s arm stays on backup and wake,
+			// where a brush of the screen used to start a job.
+			wait := 700 * time.Millisecond
+			if act.ID == "os_windows" || act.ID == "os_linux" || act.ID == "gpu_power" {
+				wait = 0
+			}
+			a.ArmedAt = a.Mono + wait
 			return
 		}
 		a.toast("Sending...")
@@ -532,12 +545,126 @@ func (a *App) sendConfirm() {
 		id = a.Action.ID
 	}
 	fmt.Printf("confirm send %s\n", id)
+	a.holdGPU(id)
 	a.toast("sent")
 	a.Action = nil
 	a.Screen = scrDetail
 	a.FetchSoon = true
 	if id != "" && a.Post != nil {
 		go a.Post(id)
+	}
+}
+
+func (a *App) gpuTile() *Tile {
+	if a.Snap == nil {
+		return nil
+	}
+	for i := range a.Snap.Tiles {
+		if a.Snap.Tiles[i].ID == "gpu" {
+			return &a.Snap.Tiles[i]
+		}
+	}
+	return nil
+}
+
+func gpuOS(t *Tile) string {
+	if t == nil {
+		return ""
+	}
+	for _, p := range t.Pages {
+		for _, row := range p.Rows {
+			if row.Label == "os" && row.Value != "" {
+				return row.Value
+			}
+		}
+	}
+	return t.OS
+}
+
+func gpuPhase(v string) bool {
+	switch v {
+	case "starting", "draining", "rebooting", "waking", "poweroff", "retry", "switching":
+		return true
+	}
+	return false
+}
+
+func (a *App) holdGPU(id string) {
+	switch id {
+	case "os_windows", "os_linux", "gpu_power":
+	default:
+		return
+	}
+	t := a.gpuTile()
+	if t == nil {
+		return
+	}
+	a.HoldID = id
+	a.HoldFrom = gpuOS(t)
+	a.HoldUntil = a.Mono + 20*time.Second
+	paintGPUHold(t)
+}
+
+func (a *App) keepHold() {
+	if a.HoldID == "" {
+		return
+	}
+	if a.Mono >= a.HoldUntil || a.holdLanded() {
+		a.HoldID = ""
+		return
+	}
+	if t := a.gpuTile(); t != nil {
+		paintGPUHold(t)
+	}
+}
+
+func (a *App) holdLanded() bool {
+	t := a.gpuTile()
+	if t == nil {
+		return false
+	}
+	osVal := gpuOS(t)
+	if gpuPhase(osVal) {
+		return true
+	}
+	for _, p := range t.Pages {
+		for _, act := range p.Actions {
+			if act.Why == "busy" {
+				return true
+			}
+		}
+	}
+	switch a.HoldID {
+	case "os_windows":
+		return osVal == "windows" || t.OS == "windows"
+	case "os_linux":
+		return osVal == "linux" || t.OS == "linux"
+	case "gpu_power":
+		if a.HoldFrom == "off" {
+			return osVal != "off" && osVal != "" && t.Big != "OFF"
+		}
+		return t.State == "off" || t.Big == "OFF" || osVal == "off"
+	}
+	return false
+}
+
+func paintGPUHold(t *Tile) {
+	t.State = "busy"
+	t.Big = "..."
+	t.L2 = "starting"
+	for pi := range t.Pages {
+		for ri := range t.Pages[pi].Rows {
+			if t.Pages[pi].Rows[ri].Label != "os" {
+				continue
+			}
+			t.Pages[pi].Rows[ri].Value = "starting"
+			t.Pages[pi].Rows[ri].State = "busy"
+		}
+		for ai := range t.Pages[pi].Actions {
+			t.Pages[pi].Actions[ai].Enabled = false
+			t.Pages[pi].Actions[ai].Why = "busy"
+			t.Pages[pi].Actions[ai].Current = false
+		}
 	}
 }
 

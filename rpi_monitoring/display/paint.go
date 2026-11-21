@@ -467,8 +467,8 @@ func (a *App) paintAction(r image.Rectangle, act Action) {
 }
 
 func (a *App) actionFace(label string, width int) font.Face {
-	// One size for every button that can hold the word. Windows and Linux stay matched.
-	for _, face := range []font.Face{a.F.sans17, a.F.sans11} {
+	// Largest face that fits the measured button. Windows and Linux stay on the same size.
+	for _, face := range []font.Face{a.F.sans22, a.F.sans20, a.F.sans17, a.F.sans11} {
 		if font.MeasureString(face, label).Ceil() <= width {
 			return face
 		}

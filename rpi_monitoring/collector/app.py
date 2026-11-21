@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from checks import build
+from checks import build, stamp_gpu
 from fetch import assemble, fire
 from model import snap
 
@@ -177,6 +177,13 @@ async def actions(request: Request):
     action = body.get("id")
     if action not in ("wake", "backup", "os_windows", "os_linux", "gpu_power", "cancel_shutdown"):
         return JSONResponse({"error": "unknown"}, status_code=400)
-    # Answer before any SSH, drain, or reboot. The work continues in the background.
+    # The GPU buttons must not wait on SSH. start() only marks the job and
+    # returns; the screen cache is updated before this response goes out.
+    if action in ("os_windows", "os_linux", "gpu_power"):
+        from os_switch import start
+        start(action)
+        with _lock:
+            stamp_gpu(_cache.get("snap"), "starting")
+        return JSONResponse({"ok": True, "id": action}, status_code=200)
     threading.Thread(target=_kick, args=(action,), daemon=True).start()
     return JSONResponse({"ok": True, "id": action}, status_code=200)

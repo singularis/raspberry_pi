@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LCD monitor</title>
-<link rel="stylesheet" href="/static/style.css?v=13">
+<link rel="stylesheet" href="/static/style.css?v=14">
 </head>
 <body>
 <main class="page">
@@ -22,6 +22,8 @@
 <script>
 const sections = document.getElementById("sections");
 let snap = null;
+let sentId = "";
+let viewGen = 0;
 
 function summary(s) {
   const n = s.summary || {};
@@ -84,7 +86,7 @@ function paint() {
   sections.innerHTML = "";
   (snap.tiles || []).forEach(function (t) {
     const sec = document.createElement("section");
-    sec.className = "block " + (t.state || "off");
+    sec.className = "block " + (t.state || "off") + (t.os === "windows" ? " os-windows" : "");
     const head = document.createElement("header");
     const h = document.createElement("h2");
     h.textContent = t.label || "";
@@ -185,7 +187,8 @@ function paintActions() {
     text.appendChild(body);
     const note = document.createElement("p");
     note.className = "note";
-    b.onclick = function () { run(act, note); };
+    if (act.id === sentId) note.textContent = "sent";
+    b.onclick = function () { run(act); };
     line.appendChild(b);
     line.appendChild(text);
     line.appendChild(note);
@@ -193,26 +196,70 @@ function paintActions() {
   });
 }
 
-async function run(act, note) {
+function markWorking(id) {
+  viewGen++;
+  sentId = id;
+  if (!snap) return;
+  (snap.tiles || []).forEach(function (t) {
+    const gpu = t.id === "gpu" && (id === "os_windows" || id === "os_linux" || id === "gpu_power");
+    if (gpu) {
+      t.state = "busy";
+      t.big = "...";
+    }
+    (t.pages || []).forEach(function (page) {
+      if (gpu) {
+        (page.rows || []).forEach(function (row) {
+          if (row && row[0] === "os") {
+            row[1] = "starting";
+            row[2] = "busy";
+          }
+        });
+      }
+      (page.actions || []).forEach(function (act) {
+        if (act.id === id) {
+          act.enabled = false;
+          act.why = "busy";
+          act.current = false;
+        }
+      });
+    });
+  });
+  paint();
+}
+
+function run(act) {
   const title = (act.confirm && act.confirm.title) || act.label;
   const body = (act.confirm && act.confirm.body) || "";
   if (!window.confirm(body ? title + "\n\n" + body : title)) return;
-  note.textContent = "sending";
-  const r = await fetch("/api/actions", {
+  markWorking(act.id);
+  const gen = viewGen;
+  fetch("/api/actions", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({id: act.id})
+  }).then(function (r) {
+    if (gen !== viewGen) return;
+    if (!r.ok) sentId = "";
+    return load();
+  }).catch(function () {
+    if (gen !== viewGen) return;
+    sentId = "";
+    load();
   });
-  note.textContent = r.ok ? (act.id === "wake" ? "magic packet sent" : "sent") : "failed";
 }
 
 async function load() {
+  const gen = viewGen;
   try {
     const r = await fetch("/api/display");
+    if (gen !== viewGen) return;
     if (!r.ok) throw new Error("http");
     snap = await r.json();
+    if (gen !== viewGen) return;
+    sentId = "";
     paint();
   } catch (e) {
+    if (gen !== viewGen) return;
     document.getElementById("status").textContent = "no link";
     document.getElementById("status").className = "crit";
   }

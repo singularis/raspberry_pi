@@ -122,6 +122,13 @@ h1.crit { color: var(--crit); }
 .block.crit .big { color: var(--crit); }
 .block.off .big, .block.stale .big, .block.grey .big, .block.gray .big { color: var(--off); }
 .block.busy .big { color: var(--busy); }
+.block.os-windows h2 { color: #60a5fa; }
+.block.os-windows .big { color: #60a5fa; }
+.block.os-windows.warn .big { color: var(--warn); }
+.block.os-windows.crit .big { color: var(--crit); }
+.block.os-windows.off .big,
+.block.os-windows.stale .big,
+.block.os-windows.grey .big { color: var(--off); }
 .block.idle .big { color: var(--idle); }
 .row {
   display: grid;

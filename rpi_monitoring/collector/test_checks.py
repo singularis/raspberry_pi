@@ -9,6 +9,7 @@ from checks import (
     net_state,
     node_state,
     pi_state,
+    stamp_gpu,
 )
 from fetch import dish_count, mint, should_gpu_on, throttled_flags
 from model import snap
@@ -130,6 +131,8 @@ def test_detail_pages():
     assert [r[0] for r in win_rows] == ["gpu temp", "gpu vram", "os", "health"]
     assert win_rows[0] == ["gpu temp", "47C", "ok"]
     assert win_rows[2][1] == "windows"
+    assert win_rows[2][2] == "busy"
+    assert win["state"] == "busy"
     assert win["os"] == "windows"
     assert win["big"] == "47C"
     assert win["l2"] == ""
@@ -141,6 +144,18 @@ def test_detail_pages():
     assert warn_rows[-1][0] == "warn"
     assert "gpu temp" in warn_rows[-1][1]
     assert "k8s" not in {r[0] for r in win_rows}
+    hot = build({"gpu": {"on": False, "os": "windows", "temp": 90, "vram_free_mb": 20000, "vram_total_mb": 24576}})
+    hot = next(t for t in hot if t["id"] == "gpu")
+    assert hot["state"] == "crit"
+    shown = snap(build({"gpu": {"on": True, "os": "linux", "temp": 40, "vllm": True, "claw_ok": True}}))
+    before = next(t for t in shown["tiles"] if t["id"] == "gpu")
+    stamp_gpu(shown, "starting")
+    gpu = next(t for t in shown["tiles"] if t["id"] == "gpu")
+    assert gpu is not before
+    assert gpu["state"] == "busy" and gpu["big"] == "..."
+    stamped = next(r for r in gpu["pages"][0]["rows"] if r[0] == "os")
+    assert stamped[1] == "starting" and stamped[2] == "busy"
+    assert all(a["enabled"] is False and a["why"] == "busy" for a in gpu["pages"][0]["actions"])
     assert by["backup"]["pages"][0]["actions"][0]["id"] == "wake"
     assert by["backup"]["pages"][0]["actions"][1]["id"] == "backup"
     assert by["backup"]["pages"][0]["rows"][0] == ["staging free", "off", "off"]
